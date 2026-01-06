@@ -68,6 +68,14 @@ METRIC_GROUP_LABELS = {
 
 NUMERIC_METRICS = ["age_first_sex_numeric"]
 
+# Calculated metrics - these get expanded to SQL expressions
+CALCULATED_METRICS = {
+    "pct_committed_among_active": {
+        "sql": "AVG(CASE WHEN sexually_active_hq4_flag = 1 THEN is_committed_relationship ELSE NULL END)",
+        "is_pct": True
+    }
+}
+
 # Build flat list of all metrics
 ALL_METRICS = []
 for group_metrics in METRIC_GROUPS.values():

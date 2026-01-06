@@ -11,7 +11,8 @@ from ar_analytics import ArUtils
 
 from .gss_config import (
     DATABASE_ID, TABLE_NAME, METRIC_GROUPS, NUMERIC_METRICS, ALL_METRICS,
-    DIMENSIONS, METRIC_LABELS, DIMENSION_LABELS, METRIC_GROUP_LABELS
+    DIMENSIONS, METRIC_LABELS, DIMENSION_LABELS, METRIC_GROUP_LABELS,
+    CALCULATED_METRICS
 )
 
 # Reckitt brand colors
@@ -157,7 +158,14 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
     # Build SQL query
     metric_selects = []
     for metric in metrics:
-        if metric in NUMERIC_METRICS:
+        if metric in CALCULATED_METRICS:
+            # Use pre-defined SQL expression for calculated metrics
+            calc_def = CALCULATED_METRICS[metric]
+            if calc_def.get("is_pct"):
+                metric_selects.append(f"{calc_def['sql']} * 100 AS {metric}")
+            else:
+                metric_selects.append(f"{calc_def['sql']} AS {metric}")
+        elif metric in NUMERIC_METRICS:
             metric_selects.append(f"AVG({metric}) AS {metric}")
         else:
             metric_selects.append(f"AVG({metric}) * 100 AS {metric}")
