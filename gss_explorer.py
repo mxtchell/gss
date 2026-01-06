@@ -7,7 +7,7 @@ from gss_explorer_helper.gss_config import INSIGHT_PROMPT_TEMPLATE, MAX_PROMPT_T
 @skill(
     name="GSS Survey Explorer",
     llm_name="gss_explorer",
-    description="Analyzes GSS (Global Sex Survey) respondent-level data across multiple metrics and demographic dimensions. Covers sexual activity status, relationship status (is_committed_relationship), satisfaction, perceived benefits, first-time emotions, and FE9 agreement statements. Use is_committed_relationship metric to analyze % in committed relationships. Use other_filters to filter by sexually_active_hq4_flag=1 when analyzing only sexually active respondents.",
+    description="Analyzes GSS (Global Sex Survey) respondent-level data. CRITICAL: For questions asking 'globally' or 'overall' percentage, set breakout_dimension to null/none - do NOT break out by country or any dimension. Only use breakout_dimension when user explicitly asks 'by country', 'by gender', etc.",
     capabilities="Analyze single metrics or groups of related metrics. Compare across one or two demographic dimensions. Generate column charts for comparisons. Provide narrative insights and detailed data tables. Filter to specific populations using other_filters.",
     limitations="Data is respondent-level survey data, not time-series. Some metrics may have limited respondent counts in certain segments. Cannot perform statistical significance testing.",
     example_questions="What are the top perceived benefits of sex? How does satisfaction vary by gender? What % of people are sexually active globally? What % of sexually active people are in committed relationships? What is the average age at first sex by country?",
