@@ -302,23 +302,23 @@ def build_chart(df, metrics, breakout1, breakout2, is_pct, suffix):
     colors = [BRAND_PINK, BRAND_SLATE, "#60a5fa", "#34d399", "#fbbf24", "#a78bfa", "#f87171"]
 
     if not breakout1:
-        # No breakout - simple bar chart
+        # No breakout - column chart
         categories = [get_label(m) for m in metrics]
         values = [round(float(df[m].iloc[0]), 1) if pd.notna(df[m].iloc[0]) else 0 for m in metrics]
         return {
-            "chart": {"type": "bar", "backgroundColor": "#ffffff", "height": max(300, len(metrics) * 50)},
+            "chart": {"type": "column", "backgroundColor": "#ffffff", "height": 380},
             "title": {"text": ""},
-            "xAxis": {"categories": categories, "labels": {"style": {"fontSize": "13px", "color": BRAND_SLATE}}},
+            "xAxis": {"categories": categories, "labels": {"style": {"fontSize": "12px", "color": BRAND_SLATE}}},
             "yAxis": {"title": {"text": "%" if is_pct else "Value", "style": {"color": BRAND_SLATE}}, "max": 100 if is_pct else None, "min": 0},
             "series": [{"name": "Value", "data": values, "colorByPoint": True, "colors": colors}],
             "legend": {"enabled": False},
             "credits": {"enabled": False},
             "tooltip": {"valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,0.95)", "borderColor": BRAND_SLATE},
-            "plotOptions": {"bar": {"dataLabels": {"enabled": True, "format": "{y:.1f}" + suffix, "style": {"fontWeight": "500", "color": BRAND_SLATE}}}}
+            "plotOptions": {"column": {"dataLabels": {"enabled": True, "format": "{y:.1f}" + suffix, "style": {"fontWeight": "500", "color": BRAND_SLATE}}}}
         }
 
     elif breakout1 and not breakout2:
-        # Single breakout
+        # Single breakout - column chart
         categories = df[breakout1].astype(str).tolist()
         series = []
         for i, m in enumerate(metrics):
@@ -328,15 +328,15 @@ def build_chart(df, metrics, breakout1, breakout2, is_pct, suffix):
                 "color": colors[i % len(colors)]
             })
         return {
-            "chart": {"type": "bar", "backgroundColor": "#ffffff", "height": max(400, len(categories) * 35)},
+            "chart": {"type": "column", "backgroundColor": "#ffffff", "height": 400},
             "title": {"text": ""},
-            "xAxis": {"categories": categories, "title": {"text": get_dim_label(breakout1), "style": {"color": BRAND_SLATE}}, "labels": {"style": {"fontSize": "12px", "color": BRAND_SLATE}}},
+            "xAxis": {"categories": categories, "title": {"text": get_dim_label(breakout1), "style": {"color": BRAND_SLATE}}, "labels": {"style": {"fontSize": "11px", "color": BRAND_SLATE}}},
             "yAxis": {"title": {"text": "%" if is_pct else "Value", "style": {"color": BRAND_SLATE}}, "max": 100 if is_pct else None, "min": 0},
             "series": series,
             "legend": {"enabled": len(metrics) > 1},
             "credits": {"enabled": False},
             "tooltip": {"shared": True, "valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,0.95)", "borderColor": BRAND_SLATE},
-            "plotOptions": {"bar": {"dataLabels": {"enabled": len(df) <= 8, "format": "{y:.1f}" + suffix, "style": {"fontSize": "11px"}}}}
+            "plotOptions": {"column": {"dataLabels": {"enabled": len(df) <= 8, "format": "{y:.1f}" + suffix, "style": {"fontSize": "11px"}}}}
         }
 
     else:
