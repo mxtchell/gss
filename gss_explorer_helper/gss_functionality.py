@@ -7,6 +7,7 @@ import jinja2
 from skill_framework import SkillInput, SkillOutput, SkillVisualization
 from skill_framework.layouts import wire_layout
 from answer_rocket import AnswerRocketClient
+from ar_analytics import ArUtils
 
 from .gss_config import (
     DATABASE_ID, TABLE_NAME, METRIC_GROUPS, NUMERIC_METRICS, ALL_METRICS,
@@ -274,17 +275,23 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
     insights_dfs = [facts_df]
 
     # Render prompts with facts
-    facts_list = facts_df.to_dict(orient='records')
-    insight_prompt = jinja2.Template(parameters.arguments.insight_prompt).render(facts=facts_list)
+    facts_list = [facts_df.to_dict(orient='records')]
+
+    # insight_prompt -> for Insights section (50-100 words)
+    insight_template = jinja2.Template(parameters.arguments.insight_prompt).render(facts=facts_list)
+
+    # max_response_prompt -> for chat/max response (30 words)
     max_response_prompt = jinja2.Template(parameters.arguments.max_prompt).render(facts=facts_list)
 
+    # Generate insights using LLM for the Insights section
+    ar_utils = ArUtils()
+    generated_insights = ar_utils.get_llm_response(insight_template)
+
     return SkillOutput(
-        final_prompt=summary,
-        narrative=narrative_text,
+        final_prompt=max_response_prompt,  # 30 word chat response
+        narrative=generated_insights,  # 50-100 word insights section
         visualizations=[SkillVisualization(title="GSS Survey Explorer", layout=html)],
-        insights_dfs=insights_dfs,
-        insight_prompt=insight_prompt,
-        max_response_prompt=max_response_prompt
+        insights_dfs=insights_dfs
     )
 
 
