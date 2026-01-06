@@ -97,3 +97,16 @@ Supports flexible breakout analysis by country, gender, relationship status, sex
 def gss_explorer(parameters: SkillInput) -> SkillOutput:
     """Main skill function for GSS survey exploration"""
     return run_gss_analysis(parameters)
+
+
+if __name__ == '__main__':
+    from skill_framework import preview_skill
+
+    skill_input: SkillInput = gss_explorer.create_input(arguments={
+        'metrics': ["benefits"],
+        'breakout_dimension': "gender",
+        'breakout_dimension_2': None,
+        'other_filters': []
+    })
+    out = gss_explorer(skill_input)
+    preview_skill(gss_explorer, out)
