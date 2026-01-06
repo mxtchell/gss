@@ -4,14 +4,14 @@ Core analysis logic for the GSS Survey Explorer skill
 """
 import pandas as pd
 import jinja2
-from skill_framework import SkillInput, SkillOutput, SkillVisualization
+from skill_framework import SkillInput, SkillOutput, SkillVisualization, ParameterDisplayDescription
 from skill_framework.layouts import wire_layout
 from answer_rocket import AnswerRocketClient
 from ar_analytics import ArUtils
 
 from .gss_config import (
     DATABASE_ID, TABLE_NAME, METRIC_GROUPS, NUMERIC_METRICS, ALL_METRICS,
-    DIMENSIONS, METRIC_LABELS, DIMENSION_LABELS
+    DIMENSIONS, METRIC_LABELS, DIMENSION_LABELS, METRIC_GROUP_LABELS
 )
 
 # Reckitt brand colors
@@ -51,6 +51,80 @@ def clean_breakout(breakout):
     if breakout in DIMENSIONS:
         return breakout
     return None
+
+
+def build_filter_sql(filters):
+    """Build SQL filter clause from other_filters parameter"""
+    if not filters:
+        return "", []
+
+    filter_conditions = []
+    filter_display = []
+
+    for f in filters:
+        if isinstance(f, dict) and 'dim' in f:
+            dim = f['dim']
+            op = f.get('op', '=')
+            values = f.get('val')
+
+            if values is None:
+                continue
+
+            # Build SQL condition
+            if isinstance(values, list) and values:
+                if len(values) == 1:
+                    filter_conditions.append(f"{dim} = '{values[0]}'")
+                    filter_display.append(f"{get_dim_label(dim)}: {values[0]}")
+                else:
+                    values_str = "', '".join(str(v) for v in values)
+                    filter_conditions.append(f"{dim} IN ('{values_str}')")
+                    filter_display.append(f"{get_dim_label(dim)}: {', '.join(str(v) for v in values)}")
+            elif isinstance(values, str):
+                filter_conditions.append(f"{dim} = '{values}'")
+                filter_display.append(f"{get_dim_label(dim)}: {values}")
+            elif isinstance(values, (int, float)):
+                filter_conditions.append(f"{dim} {op} {values}")
+                filter_display.append(f"{get_dim_label(dim)} {op} {values}")
+
+    if filter_conditions:
+        return " AND " + " AND ".join(filter_conditions), filter_display
+
+    return "", []
+
+
+def build_param_info(metrics, breakout1, breakout2, filter_display):
+    """Build parameter display descriptions for pills"""
+    param_info = []
+
+    # Metrics pill
+    metric_labels = [get_label(m) for m in metrics[:3]]
+    if len(metrics) > 3:
+        metric_labels.append(f"+{len(metrics) - 3} more")
+    param_info.append(ParameterDisplayDescription(
+        key="metrics",
+        value=f"Metrics: {', '.join(metric_labels)}"
+    ))
+
+    # Breakout pills
+    breakouts = []
+    if breakout1:
+        breakouts.append(get_dim_label(breakout1))
+    if breakout2:
+        breakouts.append(get_dim_label(breakout2))
+    if breakouts:
+        param_info.append(ParameterDisplayDescription(
+            key="breakouts",
+            value=f"Breakouts: {', '.join(breakouts)}"
+        ))
+
+    # Filter pills
+    if filter_display:
+        param_info.append(ParameterDisplayDescription(
+            key="filters",
+            value=f"Filters: {'; '.join(filter_display)}"
+        ))
+
+    return param_info
 
 
 def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
@@ -101,14 +175,12 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
         FROM {TABLE_NAME} WHERE 1=1
         """
 
-    # Add filters
-    if filters:
-        for f in filters:
-            if isinstance(f, dict) and 'dim' in f:
-                dim, values = f['dim'], f.get('val')
-                if isinstance(values, list) and values:
-                    values_str = "', '".join(str(v) for v in values)
-                    sql_query += f" AND {dim} IN ('{values_str}')"
+    # Build filter SQL and param info
+    filter_sql, filter_display = build_filter_sql(filters)
+    sql_query += filter_sql
+
+    # Build parameter display pills
+    param_info = build_param_info(metrics, breakout1, breakout2, filter_display)
 
     if group_cols:
         sql_query += f" GROUP BY {', '.join(group_cols)} ORDER BY {metrics[0]} DESC"
@@ -141,7 +213,6 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
     metric_group_title = None
     for group_name, group_metrics in METRIC_GROUPS.items():
         if set(metrics) == set(group_metrics):
-            from .gss_config import METRIC_GROUP_LABELS
             metric_group_title = METRIC_GROUP_LABELS.get(group_name, group_name.replace('_', ' ').title())
             break
 
@@ -291,7 +362,8 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
         final_prompt=max_response_prompt,  # 30 word chat response
         narrative=generated_insights,  # 50-100 word insights section
         visualizations=[SkillVisualization(title="GSS Survey Explorer", layout=html)],
-        insights_dfs=insights_dfs
+        insights_dfs=insights_dfs,
+        parameter_display_descriptions=param_info
     )
 
 
