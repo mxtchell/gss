@@ -3,6 +3,7 @@ GSS Explorer Functionality
 Core analysis logic for the GSS Survey Explorer skill
 """
 import pandas as pd
+import jinja2
 from skill_framework import SkillInput, SkillOutput, SkillVisualization
 from skill_framework.layouts import wire_layout
 from answer_rocket import AnswerRocketClient
@@ -132,14 +133,38 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
     is_pct = all(m not in NUMERIC_METRICS for m in metrics)
     suffix = "%" if is_pct else ""
 
-    # Title
+    # Title - make it descriptive
     metric_names = [get_label(m) for m in metrics]
-    if len(metric_names) == 1:
+
+    # Determine metric group name if applicable
+    metric_group_title = None
+    for group_name, group_metrics in METRIC_GROUPS.items():
+        if set(metrics) == set(group_metrics):
+            from .gss_config import METRIC_GROUP_LABELS
+            metric_group_title = METRIC_GROUP_LABELS.get(group_name, group_name.replace('_', ' ').title())
+            break
+
+    if metric_group_title:
+        title = metric_group_title
+    elif len(metric_names) == 1:
         title = metric_names[0]
-    elif len(metric_names) <= 3:
-        title = ", ".join(metric_names)
+    elif len(metric_names) == 2:
+        title = f"{metric_names[0]} & {metric_names[1]}"
+    elif len(metric_names) <= 4:
+        title = ", ".join(metric_names[:-1]) + f" & {metric_names[-1]}"
     else:
-        title = f"{len(metric_names)} Metrics Analysis"
+        # Use category hint from first metric
+        first_metric = metrics[0]
+        if 'benefit' in first_metric:
+            title = "Perceived Benefits Analysis"
+        elif 'satisfaction' in first_metric or 'satisfied' in first_metric:
+            title = "Satisfaction Metrics"
+        elif 'emotion' in first_metric:
+            title = "First-Time Emotions"
+        elif 'fe9' in first_metric:
+            title = "Attitudes & Expectations"
+        else:
+            title = "Survey Metrics Overview"
 
     subtitle = ""
     if breakout1:
@@ -225,44 +250,6 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
                     "children": "",
                     "columns": columns,
                     "data": table_data
-                },
-                {
-                    "name": "InsightsContainer",
-                    "type": "FlexContainer",
-                    "children": "",
-                    "direction": "column",
-                    "style": {
-                        "backgroundColor": "#f8fafc",
-                        "padding": "16px 20px",
-                        "borderRadius": "8px",
-                        "marginTop": "24px",
-                        "borderLeft": f"4px solid {BRAND_PINK}"
-                    }
-                },
-                {
-                    "name": "InsightsHeader",
-                    "type": "Paragraph",
-                    "children": "",
-                    "text": "Insights",
-                    "parentId": "InsightsContainer",
-                    "style": {
-                        "fontSize": "15px",
-                        "fontWeight": "600",
-                        "color": BRAND_SLATE,
-                        "marginBottom": "8px"
-                    }
-                },
-                {
-                    "name": "InsightsText",
-                    "type": "Markdown",
-                    "children": "",
-                    "text": narrative_text,
-                    "parentId": "InsightsContainer",
-                    "style": {
-                        "fontSize": "14px",
-                        "lineHeight": "1.6",
-                        "color": "#374151"
-                    }
                 }
             ]
         },
@@ -282,10 +269,22 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
     else:
         summary = f"Analyzed {len(metrics)} metric(s) across {int(df['respondent_count'].iloc[0]):,} respondents."
 
+    # Build facts dataframe for insights
+    facts_df = build_facts_df(df, metrics, breakout1, breakout2, suffix)
+    insights_dfs = [facts_df]
+
+    # Render prompts with facts
+    facts_list = facts_df.to_dict(orient='records')
+    insight_prompt = jinja2.Template(parameters.arguments.insight_prompt).render(facts=facts_list)
+    max_response_prompt = jinja2.Template(parameters.arguments.max_prompt).render(facts=facts_list)
+
     return SkillOutput(
         final_prompt=summary,
         narrative=narrative_text,
-        visualizations=[SkillVisualization(title="GSS Survey Explorer", layout=html)]
+        visualizations=[SkillVisualization(title="GSS Survey Explorer", layout=html)],
+        insights_dfs=insights_dfs,
+        insight_prompt=insight_prompt,
+        max_response_prompt=max_response_prompt
     )
 
 
@@ -386,6 +385,44 @@ def build_table(df, metrics, breakout1, breakout2, suffix):
             table_data.append(row)
 
     return columns, table_data
+
+
+def build_facts_df(df, metrics, breakout1, breakout2, suffix):
+    """Build facts dataframe for LLM prompts"""
+    facts = []
+
+    if not breakout1:
+        # Overall metrics
+        total = int(df['respondent_count'].iloc[0])
+        facts.append({'fact_type': 'overview', 'detail': f'Total respondents: {total:,}'})
+        for m in metrics:
+            val = df[m].iloc[0]
+            if pd.notna(val):
+                facts.append({
+                    'fact_type': 'metric',
+                    'metric': get_label(m),
+                    'value': f'{val:.1f}{suffix}',
+                    'respondents': total
+                })
+    else:
+        # Breakout metrics
+        for m in metrics[:3]:  # Top 3 metrics
+            if m in df.columns:
+                mx, mn = df[m].max(), df[m].min()
+                if pd.notna(mx) and pd.notna(mn):
+                    mx_seg = df.loc[df[m].idxmax(), breakout1]
+                    mn_seg = df.loc[df[m].idxmin(), breakout1]
+                    facts.append({
+                        'fact_type': 'comparison',
+                        'metric': get_label(m),
+                        'highest_segment': str(mx_seg),
+                        'highest_value': f'{mx:.1f}{suffix}',
+                        'lowest_segment': str(mn_seg),
+                        'lowest_value': f'{mn:.1f}{suffix}',
+                        'gap': f'{mx - mn:.1f} points'
+                    })
+
+    return pd.DataFrame(facts)
 
 
 def build_narrative(df, metrics, breakout1, breakout2, suffix):
