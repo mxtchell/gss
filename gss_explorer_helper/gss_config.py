@@ -15,7 +15,8 @@ METRIC_GROUPS = {
         "chosen_not_to_have_sex"
     ],
     "relationship": [
-        "is_committed_relationship"
+        "is_committed_relationship",
+        "pct_committed_among_active"
     ],
     "satisfaction": [
         "current_sex_life_satisfied_t2b",
@@ -93,6 +94,7 @@ METRIC_LABELS = {
     "explicit_inactive_flag": "Sexually Inactive (Explicit)",
     "chosen_not_to_have_sex": "Chosen Not to Have Sex",
     "is_committed_relationship": "In Committed Relationship",
+    "pct_committed_among_active": "% Committed (Sexually Active)",
     "current_sex_life_satisfied_t2b": "Satisfied with Sex Life (T2B)",
     "current_sex_life_not_satisfied": "Not Satisfied with Sex Life",
     "first_time_satisfaction_t2b": "Satisfied with First Time (T2B)",
