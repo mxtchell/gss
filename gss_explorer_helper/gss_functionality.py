@@ -12,6 +12,10 @@ from .gss_config import (
     DIMENSIONS, METRIC_LABELS, DIMENSION_LABELS
 )
 
+# Reckitt brand colors
+BRAND_PINK = "#FF007F"
+BRAND_SLATE = "#415A6C"
+
 
 def get_label(metric):
     return METRIC_LABELS.get(metric, metric.replace('_', ' ').title())
@@ -130,11 +134,18 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
 
     # Title
     metric_names = [get_label(m) for m in metrics]
-    title = ", ".join(metric_names[:3]) if len(metric_names) <= 3 else f"{len(metric_names)} Metrics"
+    if len(metric_names) == 1:
+        title = metric_names[0]
+    elif len(metric_names) <= 3:
+        title = ", ".join(metric_names)
+    else:
+        title = f"{len(metric_names)} Metrics Analysis"
+
+    subtitle = ""
     if breakout1:
-        title += f" by {get_dim_label(breakout1)}"
+        subtitle = f"by {get_dim_label(breakout1)}"
     if breakout2:
-        title += f" and {get_dim_label(breakout2)}"
+        subtitle += f" and {get_dim_label(breakout2)}"
 
     # Build chart
     chart = build_chart(df, metrics, breakout1, breakout2, is_pct, suffix)
@@ -142,25 +153,117 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
     # Build table
     columns, table_data = build_table(df, metrics, breakout1, breakout2, suffix)
 
-    # Build narrative
+    # Build narrative (50-100 words)
     narrative_text = build_narrative(df, metrics, breakout1, breakout2, suffix)
 
-    # Build layout
+    # Build layout with Reckitt branding
     layout = {
         "layoutJson": {
             "type": "Document",
-            "style": {"padding": "20px", "fontFamily": "system-ui, -apple-system, sans-serif"},
+            "style": {"padding": "20px", "fontFamily": "system-ui, -apple-system, sans-serif", "backgroundColor": "#ffffff"},
             "children": [
-                {"name": "Header", "type": "Paragraph", "children": "", "text": title,
-                 "style": {"fontSize": "24px", "fontWeight": "bold", "marginBottom": "20px", "color": "#1e293b"}},
-                {"name": "Chart", "type": "HighchartsChart", "children": "", "minHeight": "400px", "options": chart},
-                {"name": "InsightsHeader", "type": "Paragraph", "children": "", "text": "Key Insights",
-                 "style": {"fontSize": "18px", "fontWeight": "bold", "marginTop": "25px", "marginBottom": "10px", "color": "#1e293b"}},
-                {"name": "Insights", "type": "Markdown", "children": "", "text": narrative_text,
-                 "style": {"fontSize": "14px", "lineHeight": "1.6", "color": "#374151"}},
-                {"name": "TableHeader", "type": "Paragraph", "children": "", "text": "Detailed Data",
-                 "style": {"fontSize": "18px", "fontWeight": "bold", "marginTop": "25px", "marginBottom": "15px", "color": "#1e293b"}},
-                {"name": "ResultsTable", "type": "DataTable", "children": "", "columns": columns, "data": table_data}
+                {
+                    "name": "HeaderContainer",
+                    "type": "FlexContainer",
+                    "children": "",
+                    "direction": "column",
+                    "style": {
+                        "backgroundColor": BRAND_SLATE,
+                        "padding": "20px 24px",
+                        "borderRadius": "8px",
+                        "marginBottom": "24px"
+                    }
+                },
+                {
+                    "name": "MainTitle",
+                    "type": "Header",
+                    "children": "",
+                    "text": title,
+                    "parentId": "HeaderContainer",
+                    "style": {
+                        "fontSize": "22px",
+                        "fontWeight": "600",
+                        "color": "#ffffff",
+                        "margin": "0"
+                    }
+                },
+                {
+                    "name": "Subtitle",
+                    "type": "Paragraph",
+                    "children": "",
+                    "text": subtitle if subtitle else "Overall Analysis",
+                    "parentId": "HeaderContainer",
+                    "style": {
+                        "fontSize": "14px",
+                        "color": "#cbd5e1",
+                        "marginTop": "4px"
+                    }
+                },
+                {
+                    "name": "Chart",
+                    "type": "HighchartsChart",
+                    "children": "",
+                    "minHeight": "400px",
+                    "options": chart
+                },
+                {
+                    "name": "TableHeader",
+                    "type": "Paragraph",
+                    "children": "",
+                    "text": "Detailed Results",
+                    "style": {
+                        "fontSize": "16px",
+                        "fontWeight": "600",
+                        "marginTop": "28px",
+                        "marginBottom": "12px",
+                        "color": BRAND_SLATE
+                    }
+                },
+                {
+                    "name": "ResultsTable",
+                    "type": "DataTable",
+                    "children": "",
+                    "columns": columns,
+                    "data": table_data
+                },
+                {
+                    "name": "InsightsContainer",
+                    "type": "FlexContainer",
+                    "children": "",
+                    "direction": "column",
+                    "style": {
+                        "backgroundColor": "#f8fafc",
+                        "padding": "16px 20px",
+                        "borderRadius": "8px",
+                        "marginTop": "24px",
+                        "borderLeft": f"4px solid {BRAND_PINK}"
+                    }
+                },
+                {
+                    "name": "InsightsHeader",
+                    "type": "Paragraph",
+                    "children": "",
+                    "text": "Insights",
+                    "parentId": "InsightsContainer",
+                    "style": {
+                        "fontSize": "15px",
+                        "fontWeight": "600",
+                        "color": BRAND_SLATE,
+                        "marginBottom": "8px"
+                    }
+                },
+                {
+                    "name": "InsightsText",
+                    "type": "Markdown",
+                    "children": "",
+                    "text": narrative_text,
+                    "parentId": "InsightsContainer",
+                    "style": {
+                        "fontSize": "14px",
+                        "lineHeight": "1.6",
+                        "color": "#374151"
+                    }
+                }
             ]
         },
         "inputVariables": []
@@ -189,31 +292,45 @@ def run_gss_analysis(parameters: SkillInput) -> SkillOutput:
 def build_chart(df, metrics, breakout1, breakout2, is_pct, suffix):
     """Build Highcharts configuration based on breakout configuration"""
 
+    # Use Reckitt-inspired colors
+    colors = [BRAND_PINK, BRAND_SLATE, "#60a5fa", "#34d399", "#fbbf24", "#a78bfa", "#f87171"]
+
     if not breakout1:
         # No breakout - simple bar chart
         categories = [get_label(m) for m in metrics]
         values = [round(float(df[m].iloc[0]), 1) if pd.notna(df[m].iloc[0]) else 0 for m in metrics]
         return {
             "chart": {"type": "bar", "backgroundColor": "#ffffff", "height": max(300, len(metrics) * 50)},
-            "title": {"text": ""}, "xAxis": {"categories": categories},
-            "yAxis": {"title": {"text": "%" if is_pct else "Value"}, "max": 100 if is_pct else None, "min": 0},
-            "series": [{"name": "Value", "data": values, "colorByPoint": True}],
-            "legend": {"enabled": False}, "credits": {"enabled": False},
-            "tooltip": {"valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,1)", "useHTML": False},
-            "plotOptions": {"bar": {"dataLabels": {"enabled": True, "format": "{y:.1f}" + suffix}}}
+            "title": {"text": ""},
+            "xAxis": {"categories": categories, "labels": {"style": {"fontSize": "13px", "color": BRAND_SLATE}}},
+            "yAxis": {"title": {"text": "%" if is_pct else "Value", "style": {"color": BRAND_SLATE}}, "max": 100 if is_pct else None, "min": 0},
+            "series": [{"name": "Value", "data": values, "colorByPoint": True, "colors": colors}],
+            "legend": {"enabled": False},
+            "credits": {"enabled": False},
+            "tooltip": {"valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,0.95)", "borderColor": BRAND_SLATE},
+            "plotOptions": {"bar": {"dataLabels": {"enabled": True, "format": "{y:.1f}" + suffix, "style": {"fontWeight": "500", "color": BRAND_SLATE}}}}
         }
 
     elif breakout1 and not breakout2:
         # Single breakout
         categories = df[breakout1].astype(str).tolist()
-        series = [{"name": get_label(m), "data": df[m].fillna(0).round(1).tolist()} for m in metrics]
+        series = []
+        for i, m in enumerate(metrics):
+            series.append({
+                "name": get_label(m),
+                "data": df[m].fillna(0).round(1).tolist(),
+                "color": colors[i % len(colors)]
+            })
         return {
-            "chart": {"type": "bar", "backgroundColor": "#ffffff", "height": max(400, len(categories) * 30)},
-            "title": {"text": ""}, "xAxis": {"categories": categories, "title": {"text": get_dim_label(breakout1)}},
-            "yAxis": {"title": {"text": "%" if is_pct else "Value"}, "max": 100 if is_pct else None, "min": 0},
-            "series": series, "legend": {"enabled": len(metrics) > 1}, "credits": {"enabled": False},
-            "tooltip": {"shared": True, "valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,1)", "useHTML": False},
-            "plotOptions": {"bar": {"dataLabels": {"enabled": len(df) <= 10, "format": "{y:.1f}" + suffix}}}
+            "chart": {"type": "bar", "backgroundColor": "#ffffff", "height": max(400, len(categories) * 35)},
+            "title": {"text": ""},
+            "xAxis": {"categories": categories, "title": {"text": get_dim_label(breakout1), "style": {"color": BRAND_SLATE}}, "labels": {"style": {"fontSize": "12px", "color": BRAND_SLATE}}},
+            "yAxis": {"title": {"text": "%" if is_pct else "Value", "style": {"color": BRAND_SLATE}}, "max": 100 if is_pct else None, "min": 0},
+            "series": series,
+            "legend": {"enabled": len(metrics) > 1},
+            "credits": {"enabled": False},
+            "tooltip": {"shared": True, "valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,0.95)", "borderColor": BRAND_SLATE},
+            "plotOptions": {"bar": {"dataLabels": {"enabled": len(df) <= 8, "format": "{y:.1f}" + suffix, "style": {"fontSize": "11px"}}}}
         }
 
     else:
@@ -222,22 +339,23 @@ def build_chart(df, metrics, breakout1, breakout2, is_pct, suffix):
         sec_vals = df[breakout2].unique().tolist()
         metric = metrics[0]
         series = []
-        for sv in sec_vals:
+        for i, sv in enumerate(sec_vals):
             data = []
             for pv in pri_vals:
                 mask = (df[breakout1] == pv) & (df[breakout2] == sv)
                 val = df.loc[mask, metric].iloc[0] if mask.any() else 0
                 data.append(round(float(val), 1) if pd.notna(val) else 0)
-            series.append({"name": str(sv), "data": data})
+            series.append({"name": str(sv), "data": data, "color": colors[i % len(colors)]})
         return {
             "chart": {"type": "column", "backgroundColor": "#ffffff", "height": 450},
-            "title": {"text": get_label(metric)},
-            "xAxis": {"categories": [str(v) for v in pri_vals], "title": {"text": get_dim_label(breakout1)}},
-            "yAxis": {"title": {"text": "%" if is_pct else "Value"}, "max": 100 if is_pct else None, "min": 0},
-            "series": series, "legend": {"enabled": True, "title": {"text": get_dim_label(breakout2)}},
+            "title": {"text": get_label(metric), "style": {"fontSize": "16px", "color": BRAND_SLATE}},
+            "xAxis": {"categories": [str(v) for v in pri_vals], "title": {"text": get_dim_label(breakout1), "style": {"color": BRAND_SLATE}}},
+            "yAxis": {"title": {"text": "%" if is_pct else "Value", "style": {"color": BRAND_SLATE}}, "max": 100 if is_pct else None, "min": 0},
+            "series": series,
+            "legend": {"enabled": True, "title": {"text": get_dim_label(breakout2), "style": {"color": BRAND_SLATE}}},
             "credits": {"enabled": False},
-            "tooltip": {"valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,1)", "useHTML": False},
-            "plotOptions": {"column": {"dataLabels": {"enabled": len(pri_vals) <= 6, "format": "{y:.1f}" + suffix}}}
+            "tooltip": {"valueSuffix": suffix, "backgroundColor": "rgba(255,255,255,0.95)", "borderColor": BRAND_SLATE},
+            "plotOptions": {"column": {"dataLabels": {"enabled": len(pri_vals) <= 5, "format": "{y:.1f}" + suffix}}}
         }
 
 
@@ -271,37 +389,47 @@ def build_table(df, metrics, breakout1, breakout2, suffix):
 
 
 def build_narrative(df, metrics, breakout1, breakout2, suffix):
-    """Build insights narrative"""
+    """Build insights narrative (50-100 words)"""
     parts = []
 
     if not breakout1:
         total = int(df['respondent_count'].iloc[0])
-        parts.append(f"Based on **{total:,}** respondents:\n")
         vals = [(get_label(m), float(df[m].iloc[0])) for m in metrics if pd.notna(df[m].iloc[0])]
         vals.sort(key=lambda x: x[1], reverse=True)
-        if vals:
-            parts.append(f"- **Top:** {vals[0][0]} at {vals[0][1]:.1f}{suffix}")
-            if len(vals) > 1:
-                parts.append(f"- **Lowest:** {vals[-1][0]} at {vals[-1][1]:.1f}{suffix}")
+
+        parts.append(f"Analysis of **{total:,}** survey respondents reveals that **{vals[0][0]}** leads at **{vals[0][1]:.1f}{suffix}**")
+        if len(vals) > 1:
+            parts.append(f", while **{vals[-1][0]}** is lowest at **{vals[-1][1]:.1f}{suffix}**.")
+            spread = vals[0][1] - vals[-1][1]
+            parts.append(f" The **{spread:.1f} point spread** between highest and lowest metrics suggests meaningful variation in how respondents perceive different aspects of this topic.")
+        else:
+            parts.append(".")
 
     elif breakout1 and not breakout2:
-        parts.append(f"Analysis across **{len(df)}** {get_dim_label(breakout1)} segments:\n")
-        for m in metrics[:3]:
+        num_segments = len(df)
+        parts.append(f"Comparing **{num_segments}** {get_dim_label(breakout1)} segments:\n\n")
+
+        for m in metrics[:2]:
             if m in df.columns:
                 mx, mn = df[m].max(), df[m].min()
                 if pd.notna(mx) and pd.notna(mn):
                     mx_seg = df.loc[df[m].idxmax(), breakout1]
                     mn_seg = df.loc[df[m].idxmin(), breakout1]
-                    parts.append(f"- **{get_label(m)}:** Highest in {mx_seg} ({mx:.1f}{suffix}), lowest in {mn_seg} ({mn:.1f}{suffix}). Gap: {mx-mn:.1f} pts.")
+                    gap = mx - mn
+                    parts.append(f"- **{get_label(m)}**: {mx_seg} leads at {mx:.1f}{suffix}, {mn_seg} lowest at {mn:.1f}{suffix} ({gap:.1f}pt gap)\n")
+
+        if len(metrics) > 2:
+            parts.append(f"\n*{len(metrics) - 2} additional metric(s) shown in table below.*")
 
     else:
-        parts.append(f"Cross-analysis by **{get_dim_label(breakout1)}** and **{get_dim_label(breakout2)}**:\n")
+        parts.append(f"Cross-analysis by **{get_dim_label(breakout1)}** and **{get_dim_label(breakout2)}**:\n\n")
         m = metrics[0]
         if m in df.columns:
             mx, mn = df[m].max(), df[m].min()
             if pd.notna(mx) and pd.notna(mn):
                 mx_r, mn_r = df.loc[df[m].idxmax()], df.loc[df[m].idxmin()]
-                parts.append(f"- **{get_label(m)}** highest ({mx:.1f}{suffix}): {mx_r[breakout1]} / {mx_r[breakout2]}")
-                parts.append(f"- **{get_label(m)}** lowest ({mn:.1f}{suffix}): {mn_r[breakout1]} / {mn_r[breakout2]}")
+                gap = mx - mn
+                parts.append(f"**{get_label(m)}** ranges from **{mn:.1f}{suffix}** ({mn_r[breakout1]} / {mn_r[breakout2]}) to **{mx:.1f}{suffix}** ({mx_r[breakout1]} / {mx_r[breakout2]}). ")
+                parts.append(f"This **{gap:.1f} point gap** highlights significant variation across demographic intersections, suggesting targeted opportunities for further analysis.")
 
-    return "\n".join(parts)
+    return "".join(parts)
