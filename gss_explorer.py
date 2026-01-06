@@ -7,11 +7,11 @@ from gss_explorer_helper.gss_config import INSIGHT_PROMPT_TEMPLATE, MAX_PROMPT_T
 @skill(
     name="GSS Survey Explorer",
     llm_name="gss_explorer",
-    description="Analyzes GSS (Global Sex Survey) respondent-level data across multiple metrics and demographic dimensions. Covers sexual activity, satisfaction, perceived benefits, first-time emotions, and FE9 agreement statements.",
-    capabilities="Analyze single metrics or groups of related metrics. Compare across one or two demographic dimensions. Generate bar charts for single breakouts, grouped column charts for dual breakouts. Provide narrative insights and detailed data tables.",
+    description="Analyzes GSS (Global Sex Survey) respondent-level data across multiple metrics and demographic dimensions. Covers sexual activity status, relationship status (is_committed_relationship), satisfaction, perceived benefits, first-time emotions, and FE9 agreement statements. Use is_committed_relationship metric to analyze % in committed relationships. Use other_filters to filter by sexually_active_hq4_flag=1 when analyzing only sexually active respondents.",
+    capabilities="Analyze single metrics or groups of related metrics. Compare across one or two demographic dimensions. Generate column charts for comparisons. Provide narrative insights and detailed data tables. Filter to specific populations using other_filters.",
     limitations="Data is respondent-level survey data, not time-series. Some metrics may have limited respondent counts in certain segments. Cannot perform statistical significance testing.",
-    example_questions="What are the top perceived benefits of sex? How does satisfaction with sex life vary by gender? Compare first-time emotions across countries. Show sexual activity rates by relationship status. What is the average age at first sex by country and gender?",
-    parameter_guidance="metrics: Can be a metric group name (benefits, satisfaction, emotions_first_time, sexual_activity, fe9_agreement_t3b) or specific metric names. breakout_dimension: Primary dimension to segment by (country, gender, relationship_status). breakout_dimension_2: Secondary dimension for cross-tabulation.",
+    example_questions="What are the top perceived benefits of sex? How does satisfaction with sex life vary by gender? Compare first-time emotions across countries. What % of sexually active people are in committed relationships? What is the average age at first sex by country and gender?",
+    parameter_guidance="metrics: Use group names (benefits, satisfaction, emotions_first_time, sexual_activity, relationship, fe9_agreement_t3b) or specific metrics like is_committed_relationship. breakout_dimension: Segment by country, gender, relationship_status, sexual_experience. other_filters: Filter population e.g. sexually_active_hq4_flag=1 for sexually active only.",
     parameters=[
         SkillParameter(
             name="metrics",
