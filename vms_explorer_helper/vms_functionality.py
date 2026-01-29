@@ -185,6 +185,13 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
     if breakout1 and breakout2 and breakout1 == breakout2:
         breakout2 = None
 
+    # Auto-switch: is_user metric with usage_level breakout is meaningless (always 100%/0%)
+    # Convert to respondent_share which gives the actual frequency distribution
+    if breakout1 == 'usage_level' or breakout2 == 'usage_level':
+        if 'is_user' in metrics and len(metrics) == 1:
+            metrics = ['respondent_share']
+            print("DEBUG: Auto-switched is_user to respondent_share for usage_level breakout")
+
     print(f"DEBUG: Metrics: {metrics}")
     print(f"DEBUG: Breakout1: {breakout1}, Breakout2: {breakout2}")
 
