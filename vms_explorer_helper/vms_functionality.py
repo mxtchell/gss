@@ -12,7 +12,7 @@ from ar_analytics import ArUtils
 from .vms_config import (
     DATABASE_ID, TABLE_NAME, METRIC_GROUPS, NUMERIC_METRICS, ALL_METRICS,
     DIMENSIONS, METRIC_LABELS, DIMENSION_LABELS, METRIC_GROUP_LABELS,
-    CALCULATED_METRICS
+    CALCULATED_METRICS, BRAND_METRICS, RESPONDENT_METRICS
 )
 
 # Reckitt brand colors
@@ -155,68 +155,167 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
     print(f"DEBUG: Metrics: {metrics}")
     print(f"DEBUG: Breakout1: {breakout1}, Breakout2: {breakout2}")
 
-    # Determine if this is a brand-level or respondent-level query
-    is_brand_query = breakout1 == 'brand_name' or breakout2 == 'brand_name' or 'brand_aware' in metrics or 'is_user' in metrics
-
-    # Build SQL query
-    metric_selects = []
-    for metric in metrics:
-        if metric in CALCULATED_METRICS:
-            calc_def = CALCULATED_METRICS[metric]
-            if calc_def.get("is_pct"):
-                metric_selects.append(f"{calc_def['sql']} * 100 AS {metric}")
-            else:
-                metric_selects.append(f"{calc_def['sql']} AS {metric}")
-        elif metric in NUMERIC_METRICS:
-            metric_selects.append(f"AVG({metric}) AS {metric}")
-        else:
-            metric_selects.append(f"AVG({metric}) * 100 AS {metric}")
+    # Classify requested metrics
+    brand_metrics_requested = [m for m in metrics if m in BRAND_METRICS]
+    respondent_metrics_requested = [m for m in metrics if m in RESPONDENT_METRICS]
+    calculated_metrics_requested = [m for m in metrics if m in CALCULATED_METRICS]
+    numeric_metrics_requested = [m for m in metrics if m in NUMERIC_METRICS]
 
     group_cols = [b for b in [breakout1, breakout2] if b]
+    has_brand_breakout = any(b in ['brand_name', 'brand_category'] for b in group_cols)
 
-    # For respondent-level metrics without brand breakout, we need to dedupe by respondent
-    if not is_brand_query and not any(b in ['brand_name', 'brand_category'] for b in group_cols):
-        # Use subquery to get unique respondents first
+    # Build metric select expressions
+    def brand_metric_select(metric):
+        """Brand metrics: use SUM/COUNT(*) to include NULLs in denominator"""
+        return f"SUM(CAST({metric} AS DOUBLE)) * 100.0 / COUNT(*) AS {metric}"
+
+    def respondent_metric_select(metric):
+        """Respondent metrics: always AVG (dedup handled by CTE when needed)"""
+        if metric in NUMERIC_METRICS:
+            return f"AVG({metric}) AS {metric}"
+        return f"AVG({metric}) * 100 AS {metric}"
+
+    def calc_metric_select(metric):
+        calc_def = CALCULATED_METRICS[metric]
+        if calc_def.get("is_pct"):
+            return f"{calc_def['sql']} * 100 AS {metric}"
+        return f"{calc_def['sql']} AS {metric}"
+
+    # Determine query strategy
+    # is_mixed_query tracks whether filters/GROUP BY are handled inside the query branches
+    is_mixed_query = False
+
+    if brand_metrics_requested and respondent_metrics_requested and has_brand_breakout:
+        # Mixed query with brand breakout: need two CTEs
+        # CTE1: respondent-level metrics deduped, then joined back
+        # CTE2: brand-level metrics from all rows
+        resp_metric_selects = [respondent_metric_select(m) for m in respondent_metrics_requested]
+        brand_metric_selects = [brand_metric_select(m) for m in brand_metrics_requested]
+        calc_selects = [calc_metric_select(m) for m in calculated_metrics_requested]
+
+        resp_cols = ', '.join(respondent_metrics_requested)
+        brand_sel = ', '.join(brand_metric_selects)
+        resp_sel = ', '.join(resp_metric_selects)
+        all_selects = ', '.join(brand_metric_selects + resp_metric_selects + calc_selects)
+
+        sql_query = f"""
+            WITH resp_dedup AS (
+                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {resp_cols}
+                FROM {TABLE_NAME} WHERE 1=1{{filter_placeholder}}
+            ),
+            resp_agg AS (
+                SELECT {', '.join(group_cols)}, {resp_sel}
+                FROM resp_dedup
+                GROUP BY {', '.join(group_cols)}
+            ),
+            brand_agg AS (
+                SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {brand_sel}{', ' + ', '.join(calc_selects) if calc_selects else ''}
+                FROM {TABLE_NAME} WHERE 1=1{{filter_placeholder}}
+                GROUP BY {', '.join(group_cols)}
+            )
+            SELECT b.{', b.'.join(group_cols)}, b.respondent_count,
+                   {', '.join(f'b.{m}' for m in brand_metrics_requested)},
+                   {', '.join(f'r.{m}' for m in respondent_metrics_requested)}
+                   {', ' + ', '.join(f'b.{m}' for m in calculated_metrics_requested) if calculated_metrics_requested else ''}
+            FROM brand_agg b
+            JOIN resp_agg r ON {' AND '.join(f'b.{g} = r.{g}' for g in group_cols)}
+            ORDER BY {metrics[0]} DESC
+        """
+        # For mixed queries, filters are embedded in CTEs, not appended
+        filter_sql, filter_display = build_filter_sql(filters)
+        sql_query = sql_query.replace("{filter_placeholder}", filter_sql)
+        param_info = build_param_info(metrics, breakout1, breakout2, filter_display)
+
+        is_mixed_query = True
+        print(f"DEBUG: SQL (mixed): {sql_query}")
+
+    elif has_brand_breakout and not brand_metrics_requested and respondent_metrics_requested:
+        # Respondent-level metrics only, but with brand breakout (e.g. needs by brand_category)
+        # Must deduplicate by respondent per breakout group
+        # Filters go inside the CTE so we filter before dedup
+        resp_metric_selects = [respondent_metric_select(m) for m in respondent_metrics_requested]
+        calc_selects = [calc_metric_select(m) for m in calculated_metrics_requested]
+        all_selects = resp_metric_selects + calc_selects
+
+        filter_sql, filter_display = build_filter_sql(filters)
+        param_info = build_param_info(metrics, breakout1, breakout2, filter_display)
+
+        sql_query = f"""
+            WITH unique_respondents AS (
+                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(respondent_metrics_requested)}
+                FROM {TABLE_NAME} WHERE 1=1{filter_sql}
+            )
+            SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(all_selects)}
+            FROM unique_respondents
+            GROUP BY {', '.join(group_cols)} ORDER BY {metrics[0]} DESC
+        """
+        # Mark as handled so the generic filter/group-by block below skips
+        is_mixed_query = True
+
+    elif brand_metrics_requested and not has_brand_breakout:
+        # Brand metrics without brand breakout (e.g. overall brand_aware)
+        metric_selects = []
+        for m in metrics:
+            if m in BRAND_METRICS:
+                metric_selects.append(brand_metric_select(m))
+            elif m in CALCULATED_METRICS:
+                metric_selects.append(calc_metric_select(m))
+            elif m in NUMERIC_METRICS:
+                metric_selects.append(f"AVG({m}) AS {m}")
+            else:
+                metric_selects.append(f"AVG({m}) * 100 AS {m}")
+
         if group_cols:
             sql_query = f"""
-            WITH unique_respondents AS (
-                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(m for m in metrics)}
-                FROM {TABLE_NAME} WHERE 1=1
-            )
             SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(metric_selects)}
-            FROM unique_respondents WHERE 1=1
+            FROM {TABLE_NAME} WHERE 1=1
             """
         else:
             sql_query = f"""
-            WITH unique_respondents AS (
-                SELECT DISTINCT respondent_id, {', '.join(m for m in metrics)}
-                FROM {TABLE_NAME} WHERE 1=1
-            )
             SELECT COUNT(*) AS respondent_count, {', '.join(metric_selects)}
-            FROM unique_respondents WHERE 1=1
+            FROM {TABLE_NAME} WHERE 1=1
             """
+
     else:
-        # Brand-level query - use all rows
+        # Pure respondent-level metrics without brand breakout - deduplicate
+        metric_selects = []
+        for m in metrics:
+            if m in CALCULATED_METRICS:
+                metric_selects.append(calc_metric_select(m))
+            elif m in NUMERIC_METRICS:
+                metric_selects.append(f"AVG({m}) AS {m}")
+            else:
+                metric_selects.append(f"AVG({m}) * 100 AS {m}")
+
+        dedup_cols = [m for m in metrics if m not in CALCULATED_METRICS]
         if group_cols:
             sql_query = f"""
+            WITH unique_respondents AS (
+                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(dedup_cols)}
+                FROM {TABLE_NAME} WHERE 1=1
+            )
             SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(metric_selects)}
-            FROM {TABLE_NAME} WHERE 1=1
+            FROM unique_respondents WHERE 1=1
             """
         else:
             sql_query = f"""
+            WITH unique_respondents AS (
+                SELECT DISTINCT respondent_id, {', '.join(dedup_cols)}
+                FROM {TABLE_NAME} WHERE 1=1
+            )
             SELECT COUNT(*) AS respondent_count, {', '.join(metric_selects)}
-            FROM {TABLE_NAME} WHERE 1=1
+            FROM unique_respondents WHERE 1=1
             """
 
-    # Build filter SQL and param info
-    filter_sql, filter_display = build_filter_sql(filters)
-    sql_query += filter_sql
+    # For simple queries (no special CTE handling), apply filters and GROUP BY here
+    # The mixed and respondent-with-brand-breakout cases handle these internally
+    if not is_mixed_query:
+        filter_sql, filter_display = build_filter_sql(filters)
+        sql_query += filter_sql
+        param_info = build_param_info(metrics, breakout1, breakout2, filter_display)
 
-    # Build parameter display pills
-    param_info = build_param_info(metrics, breakout1, breakout2, filter_display)
-
-    if group_cols:
-        sql_query += f" GROUP BY {', '.join(group_cols)} ORDER BY {metrics[0]} DESC"
+        if group_cols:
+            sql_query += f" GROUP BY {', '.join(group_cols)} ORDER BY {metrics[0]} DESC"
 
     print(f"DEBUG: SQL: {sql_query}")
 

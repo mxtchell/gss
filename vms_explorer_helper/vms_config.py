@@ -64,6 +64,25 @@ METRIC_GROUP_LABELS = {
 # Metrics that are numeric (not percentages)
 NUMERIC_METRICS = ["age"]
 
+# Brand-level metrics - these vary per brand row and need SUM/COUNT(*) to handle NULLs correctly
+BRAND_METRICS = {"is_user", "brand_aware"}
+
+# Respondent-level metrics - identical across all brand rows for same respondent
+# Must deduplicate by respondent when breaking out by brand dimensions
+RESPONDENT_METRICS = {
+    "interest_long_term_memory", "interest_short_term_memory", "interest_working_memory",
+    "interest_focus_concentration", "interest_reasoning", "interest_eye_health",
+    "interest_stress_relief", "interest_sleep", "interest_mood", "interest_mental_energy",
+    "interest_motor_skills",
+    "psycho_self_care", "psycho_prefers_naturals", "psycho_wants_science",
+    "psycho_hcp_reliant", "psycho_health_daily_concern", "psycho_too_busy",
+    "psycho_younger_for_longer", "psycho_age_concerned", "psycho_afraid_health_decline",
+    "psycho_family_support",
+    "need_improve_brain_health", "need_boosting", "need_maintain_prevent",
+    "need_restore_after_decline",
+    "freq_daily_usage", "aware_brain_health_category"
+}
+
 # Calculated metrics - these get expanded to SQL expressions
 CALCULATED_METRICS = {
     # Example: % of users among those aware
