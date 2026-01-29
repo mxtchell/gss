@@ -120,7 +120,8 @@ DIMENSIONS = [
     "is_hispanic",
     "brand_name",
     "brand_category",
-    "usage_level"
+    "usage_level",
+    "is_user"
 ]
 
 # Human-readable metric labels
@@ -178,7 +179,8 @@ DIMENSION_LABELS = {
     "is_hispanic": "Hispanic",
     "brand_name": "Brand",
     "brand_category": "Brand Category",
-    "usage_level": "Usage Frequency"
+    "usage_level": "Usage Frequency",
+    "is_user": "Is User (L12M)"
 }
 
 # Brand categories for reference
