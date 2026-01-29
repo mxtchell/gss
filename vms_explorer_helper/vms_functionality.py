@@ -251,11 +251,14 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         suffix = "%"
         metric_names = [get_label('respondent_share')]
         title = metric_names[0] if len(metric_names) == 1 else "Respondent Composition"
-        subtitle = ""
+        subtitle_parts = []
         if breakout1:
-            subtitle = f"by {get_dim_label(breakout1)}"
+            subtitle_parts.append(f"by {get_dim_label(breakout1)}")
         if breakout2:
-            subtitle += f" and {get_dim_label(breakout2)}"
+            subtitle_parts[-1] += f" and {get_dim_label(breakout2)}"
+        if filter_display:
+            subtitle_parts.append(f"Filtered to: {', '.join(filter_display)}")
+        subtitle = " | ".join(subtitle_parts) if subtitle_parts else ""
 
         chart = build_chart(df, metrics, breakout1, breakout2, is_pct, suffix)
         columns, table_data = build_table(df, metrics, breakout1, breakout2, suffix)
@@ -528,11 +531,14 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         else:
             title = "VMS Survey Metrics"
 
-    subtitle = ""
+    subtitle_parts = []
     if breakout1:
-        subtitle = f"by {get_dim_label(breakout1)}"
+        subtitle_parts.append(f"by {get_dim_label(breakout1)}")
     if breakout2:
-        subtitle += f" and {get_dim_label(breakout2)}"
+        subtitle_parts[-1] += f" and {get_dim_label(breakout2)}"
+    if filter_display:
+        subtitle_parts.append(f"Filtered to: {', '.join(filter_display)}")
+    subtitle = " | ".join(subtitle_parts) if subtitle_parts else ""
 
     # Build chart
     chart = build_chart(df, metrics, breakout1, breakout2, is_pct, suffix)
