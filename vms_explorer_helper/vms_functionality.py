@@ -12,7 +12,7 @@ from ar_analytics import ArUtils
 from .vms_config import (
     DATABASE_ID, TABLE_NAME, METRIC_GROUPS, NUMERIC_METRICS, ALL_METRICS,
     DIMENSIONS, METRIC_LABELS, DIMENSION_LABELS, METRIC_GROUP_LABELS,
-    CALCULATED_METRICS, BRAND_METRICS, RESPONDENT_METRICS
+    CALCULATED_METRICS, BRAND_METRICS, RESPONDENT_METRICS, SPECIAL_METRICS
 )
 
 # Reckitt brand colors
@@ -156,6 +156,9 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
     print(f"DEBUG: Breakout1: {breakout1}, Breakout2: {breakout2}")
 
     # Classify requested metrics
+    has_respondent_share = "respondent_share" in metrics
+    # Remove respondent_share from regular metric processing - handled separately
+    metrics = [m for m in metrics if m not in SPECIAL_METRICS]
     brand_metrics_requested = [m for m in metrics if m in BRAND_METRICS]
     respondent_metrics_requested = [m for m in metrics if m in RESPONDENT_METRICS]
     calculated_metrics_requested = [m for m in metrics if m in CALCULATED_METRICS]
@@ -334,6 +337,12 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
 
     if len(df) == 0:
         return SkillOutput(final_prompt="No data found.", narrative="No data available.", visualizations=[])
+
+    # Add respondent_share if requested - % of total respondents in each segment
+    if has_respondent_share and 'respondent_count' in df.columns:
+        total = df['respondent_count'].sum()
+        df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
+        metrics.append('respondent_share')
 
     # Build output
     is_pct = all(m not in NUMERIC_METRICS for m in metrics)

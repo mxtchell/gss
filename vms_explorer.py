@@ -59,7 +59,10 @@ from vms_explorer_helper.vms_config import INSIGHT_PROMPT_TEMPLATE, MAX_PROMPT_T
         "demographics (gender='Female'), or user types (user_type='VMS'). "
         "TIPS: For brand comparisons, use brand_name as breakout and filter by brand_category. "
         "For respondent-level metrics (interests, psychographics), data auto-deduplicates by respondent. "
-        "For brand-level metrics (awareness, usage), all rows are used."
+        "For brand-level metrics (awareness, usage), all rows are used. "
+        "COMPOSITION QUESTIONS (e.g. 'what % of ZzzQuil users are female'): use metric=respondent_share, "
+        "breakout=gender, filter is_user=1 AND brand_name='ZzzQuil'. This shows the % distribution across segments. "
+        "For 'who uses X by Y' questions, use respondent_share with is_user=1 filter."
     ),
     parameters=[
         SkillParameter(
@@ -75,7 +78,9 @@ from vms_explorer_helper.vms_config import INSIGHT_PROMPT_TEMPLATE, MAX_PROMPT_T
                 "psycho_health_daily_concern, psycho_too_busy, psycho_younger_for_longer, psycho_age_concerned, "
                 "psycho_afraid_health_decline, psycho_family_support, "
                 "need_improve_brain_health, need_boosting, need_maintain_prevent, need_restore_after_decline, "
-                "brand_aware, is_user, aware_brain_health_category."
+                "brand_aware, is_user, aware_brain_health_category. "
+                "Special: respondent_share (% of group in each breakout segment - use with filters like is_user=1 to show composition, "
+                "e.g. 'what % of ZzzQuil users are female')."
             ),
             is_multi=True
         ),

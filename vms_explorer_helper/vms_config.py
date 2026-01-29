@@ -92,12 +92,19 @@ CALCULATED_METRICS = {
     }
 }
 
+# Special metrics handled by custom SQL logic (not via CALCULATED_METRICS)
+SPECIAL_METRICS = {"respondent_share"}
+
 # Build flat list of all metrics
 ALL_METRICS = []
 for group_metrics in METRIC_GROUPS.values():
     for m in group_metrics:
         if m not in ALL_METRICS:
             ALL_METRICS.append(m)
+# Add special metrics
+for m in SPECIAL_METRICS:
+    if m not in ALL_METRICS:
+        ALL_METRICS.append(m)
 
 # Dimensions available for breakouts
 DIMENSIONS = [
@@ -152,7 +159,9 @@ METRIC_LABELS = {
     "freq_daily_usage": "Daily Usage Frequency",
     "aware_brain_health_category": "Aware of Brain Health Supplements",
     # Calculated
-    "pct_users_among_aware": "% Users Among Aware"
+    "pct_users_among_aware": "% Users Among Aware",
+    # Special
+    "respondent_share": "% of Group"
 }
 
 # Human-readable dimension labels
