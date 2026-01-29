@@ -54,6 +54,12 @@ def clean_breakout(breakout):
     return None
 
 
+# Platform dimension names that differ from SQL column names
+DIM_SQL_ALIASES = {
+    "is_user2": "is_user",
+}
+
+
 def build_filter_sql(filters):
     """Build SQL filter clause from other_filters parameter"""
     if not filters:
@@ -67,6 +73,9 @@ def build_filter_sql(filters):
     for f in filters:
         if isinstance(f, dict) and 'dim' in f:
             dim = f['dim']
+            # Map platform dimension names to SQL column names
+            sql_dim = DIM_SQL_ALIASES.get(dim, dim)
+            dim = sql_dim
             op = f.get('op', '=')
             values = f.get('val')
 
