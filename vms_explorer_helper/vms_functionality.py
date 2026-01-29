@@ -201,7 +201,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         sql_query = f"""
             WITH resp_dedup AS (
                 SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {resp_cols}
-                FROM {TABLE_NAME} WHERE 1=1{{filter_placeholder}}
+                FROM {TABLE_NAME} WHERE is_user = 1{{filter_placeholder}}
             ),
             resp_agg AS (
                 SELECT {', '.join(group_cols)}, {resp_sel}
@@ -232,7 +232,8 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
     elif has_brand_breakout and not brand_metrics_requested and respondent_metrics_requested:
         # Respondent-level metrics only, but with brand breakout (e.g. needs by brand_category)
         # Must deduplicate by respondent per breakout group
-        # Filters go inside the CTE so we filter before dedup
+        # Also filter to is_user=1 so we compare actual USERS of each category/brand,
+        # otherwise respondent metrics are identical across all categories
         resp_metric_selects = [respondent_metric_select(m) for m in respondent_metrics_requested]
         calc_selects = [calc_metric_select(m) for m in calculated_metrics_requested]
         all_selects = resp_metric_selects + calc_selects
@@ -243,7 +244,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         sql_query = f"""
             WITH unique_respondents AS (
                 SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(respondent_metrics_requested)}
-                FROM {TABLE_NAME} WHERE 1=1{filter_sql}
+                FROM {TABLE_NAME} WHERE is_user = 1{filter_sql}
             )
             SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(all_selects)}
             FROM unique_respondents
@@ -252,8 +253,8 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         # Mark as handled so the generic filter/group-by block below skips
         is_mixed_query = True
 
-    elif brand_metrics_requested and not has_brand_breakout:
-        # Brand metrics without brand breakout (e.g. overall brand_aware)
+    elif brand_metrics_requested and not respondent_metrics_requested:
+        # Brand metrics only (with or without brand breakout)
         metric_selects = []
         for m in metrics:
             if m in BRAND_METRICS:
