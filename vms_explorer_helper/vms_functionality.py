@@ -200,6 +200,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
     if has_respondent_share and not metrics:
         # Auto-add is_user=1 when brand filter is present but no is_user filter
         # "Who uses ZzzQuil?" needs to filter to actual users, not all respondents with a ZzzQuil row
+        # BUT: skip when breakout is usage_level — user wants the full usage distribution including non-users
         has_brand_filter = any(
             isinstance(f, dict) and f.get('dim') in ('brand_name', 'brand_category')
             for f in filters
@@ -208,7 +209,8 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
             isinstance(f, dict) and f.get('dim') in ('is_user', 'is_user2')
             for f in filters
         )
-        if has_brand_filter and not has_user_filter:
+        breakout_is_usage = breakout1 in ('usage_level',) or breakout2 in ('usage_level',)
+        if has_brand_filter and not has_user_filter and not breakout_is_usage:
             filters = list(filters) + [{'dim': 'is_user', 'op': '=', 'val': '1'}]
             print("DEBUG: Auto-added is_user=1 filter for respondent_share with brand filter")
 
@@ -216,9 +218,11 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         param_info = build_param_info(['respondent_share'], breakout1, breakout2, filter_display)
 
         if group_cols:
+            # Exclude NULL values in breakout columns (e.g., usage_level=None for respondents with no usage data)
+            null_filters = " AND ".join(f"{col} IS NOT NULL" for col in group_cols)
             sql_query = f"""
             SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count
-            FROM {TABLE_NAME} WHERE 1=1{filter_sql}
+            FROM {TABLE_NAME} WHERE 1=1{filter_sql} AND {null_filters}
             GROUP BY {', '.join(group_cols)}
             """
         else:
