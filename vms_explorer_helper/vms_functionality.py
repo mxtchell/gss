@@ -59,6 +59,8 @@ def build_filter_sql(filters):
     if not filters:
         return "", []
 
+    print(f"DEBUG: Raw filters: {filters}")
+
     filter_conditions = []
     filter_display = []
 
@@ -81,8 +83,17 @@ def build_filter_sql(filters):
                     filter_conditions.append(f"{dim} IN ('{values_str}')")
                     filter_display.append(f"{get_dim_label(dim)}: {', '.join(str(v) for v in values)}")
             elif isinstance(values, str):
-                filter_conditions.append(f"{dim} = '{values}'")
-                filter_display.append(f"{get_dim_label(dim)}: {values}")
+                # Check if it's a numeric string — don't quote numeric values
+                try:
+                    num_val = float(values)
+                    if num_val == int(num_val):
+                        filter_conditions.append(f"{dim} {op} {int(num_val)}")
+                    else:
+                        filter_conditions.append(f"{dim} {op} {num_val}")
+                    filter_display.append(f"{get_dim_label(dim)} {op} {values}")
+                except ValueError:
+                    filter_conditions.append(f"{dim} = '{values}'")
+                    filter_display.append(f"{get_dim_label(dim)}: {values}")
             elif isinstance(values, (int, float)):
                 filter_conditions.append(f"{dim} {op} {values}")
                 filter_display.append(f"{get_dim_label(dim)} {op} {values}")
