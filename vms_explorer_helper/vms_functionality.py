@@ -159,13 +159,110 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
     has_respondent_share = "respondent_share" in metrics
     # Remove respondent_share from regular metric processing - handled separately
     metrics = [m for m in metrics if m not in SPECIAL_METRICS]
+
+    group_cols = [b for b in [breakout1, breakout2] if b]
+    has_brand_breakout = any(b in ['brand_name', 'brand_category'] for b in group_cols)
+
+    # If respondent_share is the only metric, just do a count query
+    if has_respondent_share and not metrics:
+        filter_sql, filter_display = build_filter_sql(filters)
+        param_info = build_param_info(['respondent_share'], breakout1, breakout2, filter_display)
+
+        if group_cols:
+            sql_query = f"""
+            SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count
+            FROM {TABLE_NAME} WHERE 1=1{filter_sql}
+            GROUP BY {', '.join(group_cols)}
+            """
+        else:
+            sql_query = f"""
+            SELECT COUNT(*) AS respondent_count
+            FROM {TABLE_NAME} WHERE 1=1{filter_sql}
+            """
+
+        print(f"DEBUG: SQL (respondent_share only): {sql_query}")
+
+        try:
+            client = AnswerRocketClient()
+            result = client.data.execute_sql_query(DATABASE_ID, sql_query, row_limit=500)
+            if not result.success or not hasattr(result, 'df'):
+                raise Exception(f"Query failed: {getattr(result, 'error', 'Unknown')}")
+            df = result.df.copy()
+        except Exception as e:
+            return SkillOutput(final_prompt=f"Error: {e}", narrative="Error loading data.", visualizations=[])
+
+        if len(df) == 0:
+            return SkillOutput(final_prompt="No data found.", narrative="No data available.", visualizations=[])
+
+        # Compute share
+        total = df['respondent_count'].sum()
+        df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
+        metrics = ['respondent_share']
+
+        # Skip to output building (reuse the rest of the function)
+        # Set variables needed downstream
+        is_pct = True
+        suffix = "%"
+        metric_names = [get_label('respondent_share')]
+        title = metric_names[0] if len(metric_names) == 1 else "Respondent Composition"
+        subtitle = ""
+        if breakout1:
+            subtitle = f"by {get_dim_label(breakout1)}"
+        if breakout2:
+            subtitle += f" and {get_dim_label(breakout2)}"
+
+        chart = build_chart(df, metrics, breakout1, breakout2, is_pct, suffix)
+        columns, table_data = build_table(df, metrics, breakout1, breakout2, suffix)
+        narrative_text = build_narrative(df, metrics, breakout1, breakout2, suffix)
+        facts_df = build_facts_df(df, metrics, breakout1, breakout2, suffix)
+
+        layout = {
+            "layoutJson": {
+                "type": "Document",
+                "style": {"padding": "20px", "fontFamily": "system-ui, -apple-system, sans-serif", "backgroundColor": "#ffffff"},
+                "children": [
+                    {"name": "HeaderContainer", "type": "FlexContainer", "children": "", "direction": "column",
+                     "style": {"backgroundColor": BRAND_PINK, "padding": "20px 24px", "borderRadius": "8px", "marginBottom": "24px"}},
+                    {"name": "MainTitle", "type": "Header", "children": "", "text": title, "parentId": "HeaderContainer",
+                     "style": {"fontSize": "22px", "fontWeight": "600", "color": "#ffffff", "margin": "0"}},
+                    {"name": "Subtitle", "type": "Paragraph", "children": "", "text": subtitle if subtitle else "Overall Analysis",
+                     "parentId": "HeaderContainer", "style": {"fontSize": "14px", "color": "#fecdd3", "marginTop": "4px"}},
+                    {"name": "Chart", "type": "HighchartsChart", "children": "", "minHeight": "400px", "options": chart},
+                    {"name": "TableHeader", "type": "Paragraph", "children": "", "text": "Detailed Results",
+                     "style": {"fontSize": "16px", "fontWeight": "600", "marginTop": "28px", "marginBottom": "12px", "color": BRAND_SLATE}},
+                    {"name": "ResultsTable", "type": "DataTable", "children": "", "columns": columns, "data": table_data}
+                ]
+            },
+            "inputVariables": []
+        }
+        try:
+            html = wire_layout(layout, {})
+        except Exception as e:
+            html = f"<div>Error: {e}</div>"
+
+        if breakout1:
+            summary = f"Composition of {len(df)} {get_dim_label(breakout1)} segments (N={int(total):,})."
+        else:
+            summary = f"Total respondents: {int(total):,}."
+
+        facts_list = [facts_df.to_dict(orient='records')]
+        insight_template = jinja2.Template(parameters.arguments.insight_prompt).render(facts=facts_list)
+        max_response_prompt = jinja2.Template(parameters.arguments.max_prompt).render(facts=facts_list)
+        ar_utils = ArUtils()
+        generated_insights = ar_utils.get_llm_response(insight_template)
+
+        return SkillOutput(
+            final_prompt=max_response_prompt,
+            narrative=generated_insights,
+            visualizations=[SkillVisualization(title="VMS Survey Explorer", layout=html)],
+            insights_dfs=[facts_df],
+            parameter_display_descriptions=param_info
+        )
+
     brand_metrics_requested = [m for m in metrics if m in BRAND_METRICS]
     respondent_metrics_requested = [m for m in metrics if m in RESPONDENT_METRICS]
     calculated_metrics_requested = [m for m in metrics if m in CALCULATED_METRICS]
     numeric_metrics_requested = [m for m in metrics if m in NUMERIC_METRICS]
-
-    group_cols = [b for b in [breakout1, breakout2] if b]
-    has_brand_breakout = any(b in ['brand_name', 'brand_category'] for b in group_cols)
 
     # Build metric select expressions
     def brand_metric_select(metric):
