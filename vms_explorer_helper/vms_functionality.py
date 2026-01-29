@@ -514,8 +514,51 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
 
     # Add respondent_share if requested - % of total respondents in each segment
     if has_respondent_share and 'respondent_count' in df.columns:
-        total = df['respondent_count'].sum()
-        df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
+        # When brand filter is present, respondent_share should show composition of USERS,
+        # not all respondents. E.g., "What % of ZzzQuil users are female?" needs is_user=1.
+        # The respondent_share-only path (above) already handles this, but when combined
+        # with other metrics (like is_user), we end up here instead.
+        has_brand_filter = any(
+            isinstance(f, dict) and f.get('dim') in ('brand_name', 'brand_category')
+            for f in filters
+        )
+        has_user_filter = any(
+            isinstance(f, dict) and f.get('dim') in ('is_user', 'is_user2')
+            for f in filters
+        )
+        breakout_is_usage = breakout1 in ('usage_level',) or breakout2 in ('usage_level',)
+
+        if has_brand_filter and not has_user_filter and not breakout_is_usage and group_cols:
+            # Run separate user-count query with is_user=1 to get composition of USERS
+            user_filters = list(filters) + [{'dim': 'is_user', 'op': '=', 'val': '1'}]
+            user_filter_sql, _ = build_filter_sql(user_filters)
+            null_filters = " AND ".join(f"{col} IS NOT NULL" for col in group_cols)
+            user_count_sql = f"""
+            SELECT {', '.join(group_cols)}, COUNT(*) AS user_count
+            FROM {TABLE_NAME} WHERE 1=1{user_filter_sql} AND {null_filters}
+            GROUP BY {', '.join(group_cols)}
+            """
+            print(f"DEBUG: SQL (user share): {user_count_sql}")
+            try:
+                user_result = client.data.execute_sql_query(DATABASE_ID, user_count_sql, row_limit=500)
+                if user_result.success and hasattr(user_result, 'df') and len(user_result.df) > 0:
+                    user_df = user_result.df
+                    total_users = user_df['user_count'].sum()
+                    df = df.merge(user_df, on=group_cols, how='left')
+                    df['user_count'] = df['user_count'].fillna(0)
+                    df['respondent_share'] = (df['user_count'] / total_users * 100).round(1)
+                    df.drop(columns=['user_count'], inplace=True)
+                    print(f"DEBUG: respondent_share computed from {int(total_users)} users (not {int(df['respondent_count'].sum())} total)")
+                else:
+                    total = df['respondent_count'].sum()
+                    df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
+            except Exception as e:
+                print(f"DEBUG: User count query failed, falling back: {e}")
+                total = df['respondent_count'].sum()
+                df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
+        else:
+            total = df['respondent_count'].sum()
+            df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
         metrics.append('respondent_share')
 
     # Add combo/AND metric to output if computed
