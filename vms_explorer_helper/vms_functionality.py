@@ -282,6 +282,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
 
     else:
         # Pure respondent-level metrics without brand breakout - deduplicate
+        # Filters go inside CTE so brand_name etc. are accessible
         metric_selects = []
         for m in metrics:
             if m in CALCULATED_METRICS:
@@ -291,28 +292,33 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
             else:
                 metric_selects.append(f"AVG({m}) * 100 AS {m}")
 
+        filter_sql, filter_display = build_filter_sql(filters)
+        param_info = build_param_info(metrics, breakout1, breakout2, filter_display)
+
         dedup_cols = [m for m in metrics if m not in CALCULATED_METRICS]
         if group_cols:
             sql_query = f"""
             WITH unique_respondents AS (
                 SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(dedup_cols)}
-                FROM {TABLE_NAME} WHERE 1=1
+                FROM {TABLE_NAME} WHERE 1=1{filter_sql}
             )
             SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(metric_selects)}
-            FROM unique_respondents WHERE 1=1
+            FROM unique_respondents
+            GROUP BY {', '.join(group_cols)} ORDER BY {metrics[0]} DESC
             """
         else:
             sql_query = f"""
             WITH unique_respondents AS (
                 SELECT DISTINCT respondent_id, {', '.join(dedup_cols)}
-                FROM {TABLE_NAME} WHERE 1=1
+                FROM {TABLE_NAME} WHERE 1=1{filter_sql}
             )
             SELECT COUNT(*) AS respondent_count, {', '.join(metric_selects)}
-            FROM unique_respondents WHERE 1=1
+            FROM unique_respondents
             """
+        is_mixed_query = True
 
-    # For simple queries (no special CTE handling), apply filters and GROUP BY here
-    # The mixed and respondent-with-brand-breakout cases handle these internally
+    # For simple queries (no CTE), apply filters and GROUP BY here
+    # CTE-based queries handle filters and GROUP BY internally
     if not is_mixed_query:
         filter_sql, filter_display = build_filter_sql(filters)
         sql_query += filter_sql
