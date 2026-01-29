@@ -75,6 +75,8 @@ def build_filter_sql(filters):
             dim = f['dim']
             # Map platform dimension names to SQL column names
             sql_dim = DIM_SQL_ALIASES.get(dim, dim)
+            # Use original dim name for display label, SQL alias for queries
+            display_label = get_dim_label(dim)
             dim = sql_dim
             op = f.get('op', '=')
             values = f.get('val')
@@ -85,12 +87,22 @@ def build_filter_sql(filters):
             # Build SQL condition
             if isinstance(values, list) and values:
                 if len(values) == 1:
-                    filter_conditions.append(f"{dim} = '{values[0]}'")
-                    filter_display.append(f"{get_dim_label(dim)}: {values[0]}")
+                    val = values[0]
+                    # Check if numeric
+                    try:
+                        num_val = float(val)
+                        if num_val == int(num_val):
+                            filter_conditions.append(f"{dim} = {int(num_val)}")
+                        else:
+                            filter_conditions.append(f"{dim} = {num_val}")
+                        filter_display.append(f"{display_label} = {val}")
+                    except (ValueError, TypeError):
+                        filter_conditions.append(f"{dim} = '{val}'")
+                        filter_display.append(f"{display_label}: {val}")
                 else:
                     values_str = "', '".join(str(v) for v in values)
                     filter_conditions.append(f"{dim} IN ('{values_str}')")
-                    filter_display.append(f"{get_dim_label(dim)}: {', '.join(str(v) for v in values)}")
+                    filter_display.append(f"{display_label}: {', '.join(str(v) for v in values)}")
             elif isinstance(values, str):
                 # Check if it's a numeric string — don't quote numeric values
                 try:
@@ -99,13 +111,13 @@ def build_filter_sql(filters):
                         filter_conditions.append(f"{dim} {op} {int(num_val)}")
                     else:
                         filter_conditions.append(f"{dim} {op} {num_val}")
-                    filter_display.append(f"{get_dim_label(dim)} {op} {values}")
+                    filter_display.append(f"{display_label} {op} {values}")
                 except ValueError:
                     filter_conditions.append(f"{dim} = '{values}'")
-                    filter_display.append(f"{get_dim_label(dim)}: {values}")
+                    filter_display.append(f"{display_label}: {values}")
             elif isinstance(values, (int, float)):
                 filter_conditions.append(f"{dim} {op} {values}")
-                filter_display.append(f"{get_dim_label(dim)} {op} {values}")
+                filter_display.append(f"{display_label} {op} {values}")
 
     if filter_conditions:
         return " AND " + " AND ".join(filter_conditions), filter_display
@@ -138,12 +150,19 @@ def build_param_info(metrics, breakout1, breakout2, filter_display):
             value=f"Breakouts: {', '.join(breakouts)}"
         ))
 
-    # Filter pills
+    # Filter pills — one pill per filter so combo filters are all visible
     if filter_display:
-        param_info.append(ParameterDisplayDescription(
-            key="filters",
-            value=f"Filters: {'; '.join(filter_display)}"
-        ))
+        if len(filter_display) == 1:
+            param_info.append(ParameterDisplayDescription(
+                key="filter_0",
+                value=f"Filter: {filter_display[0]}"
+            ))
+        else:
+            for i, fd in enumerate(filter_display):
+                param_info.append(ParameterDisplayDescription(
+                    key=f"filter_{i}",
+                    value=fd
+                ))
 
     return param_info
 
