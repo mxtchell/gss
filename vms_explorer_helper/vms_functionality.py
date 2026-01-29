@@ -150,19 +150,12 @@ def build_param_info(metrics, breakout1, breakout2, filter_display):
             value=f"Breakouts: {', '.join(breakouts)}"
         ))
 
-    # Filter pills — one pill per filter so combo filters are all visible
+    # Filter pill — use key "other_filters" to override platform auto-generated pill
     if filter_display:
-        if len(filter_display) == 1:
-            param_info.append(ParameterDisplayDescription(
-                key="filter_0",
-                value=f"Filter: {filter_display[0]}"
-            ))
-        else:
-            for i, fd in enumerate(filter_display):
-                param_info.append(ParameterDisplayDescription(
-                    key=f"filter_{i}",
-                    value=fd
-                ))
+        param_info.append(ParameterDisplayDescription(
+            key="other_filters",
+            value=f"Filters: {'; '.join(filter_display)}"
+        ))
 
     return param_info
 
@@ -204,6 +197,20 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
 
     # If respondent_share is the only metric, just do a count query
     if has_respondent_share and not metrics:
+        # Auto-add is_user=1 when brand filter is present but no is_user filter
+        # "Who uses ZzzQuil?" needs to filter to actual users, not all respondents with a ZzzQuil row
+        has_brand_filter = any(
+            isinstance(f, dict) and f.get('dim') in ('brand_name', 'brand_category')
+            for f in filters
+        )
+        has_user_filter = any(
+            isinstance(f, dict) and f.get('dim') in ('is_user', 'is_user2')
+            for f in filters
+        )
+        if has_brand_filter and not has_user_filter:
+            filters = list(filters) + [{'dim': 'is_user', 'op': '=', 'val': '1'}]
+            print("DEBUG: Auto-added is_user=1 filter for respondent_share with brand filter")
+
         filter_sql, filter_display = build_filter_sql(filters)
         param_info = build_param_info(['respondent_share'], breakout1, breakout2, filter_display)
 
