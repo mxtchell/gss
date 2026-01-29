@@ -508,6 +508,24 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
         metrics.append('respondent_share')
 
+    # Convert to 100% distribution when a full metric group is requested with no breakout
+    # e.g., all brain_health_interests → show each area's share of total responses
+    if not breakout1 and not breakout2 and len(metrics) > 2:
+        for group_name, group_metrics in METRIC_GROUPS.items():
+            if set(metrics) == set(group_metrics) or set(metrics).issubset(set(group_metrics)):
+                if len(metrics) >= len(group_metrics) - 1:  # allow near-complete groups too
+                    # Current values are individual rates (AVG*100). Convert to distribution.
+                    # Each metric value represents % of respondents interested → proportional to count
+                    # Distribution = value_i / sum(all_values) * 100
+                    metric_values = {m: df[m].iloc[0] for m in metrics if m in df.columns}
+                    total_val = sum(metric_values.values())
+                    if total_val > 0:
+                        for m in metrics:
+                            if m in df.columns:
+                                df[m] = round(metric_values[m] / total_val * 100, 1)
+                        print(f"DEBUG: Converted to 100% distribution (total interest responses: {total_val:.0f})")
+                    break
+
     # Build output
     is_pct = all(m not in NUMERIC_METRICS for m in metrics)
     suffix = "%" if is_pct else ""
