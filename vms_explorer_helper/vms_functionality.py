@@ -84,7 +84,7 @@ def build_filter_sql(filters):
             if values is None:
                 continue
 
-            # Build SQL condition
+            # Build SQL condition and display pill (format: "value (Dimension)")
             if isinstance(values, list) and values:
                 if len(values) == 1:
                     val = values[0]
@@ -95,14 +95,15 @@ def build_filter_sql(filters):
                             filter_conditions.append(f"{dim} = {int(num_val)}")
                         else:
                             filter_conditions.append(f"{dim} = {num_val}")
-                        filter_display.append(f"{display_label} = {val}")
+                        filter_display.append(f"{val} ({display_label})")
                     except (ValueError, TypeError):
                         filter_conditions.append(f"{dim} = '{val}'")
-                        filter_display.append(f"{display_label}: {val}")
+                        filter_display.append(f"{val} ({display_label})")
                 else:
                     values_str = "', '".join(str(v) for v in values)
                     filter_conditions.append(f"{dim} IN ('{values_str}')")
-                    filter_display.append(f"{display_label}: {', '.join(str(v) for v in values)}")
+                    joined_vals = ', '.join(str(v) for v in values)
+                    filter_display.append(f"{joined_vals} ({display_label})")
             elif isinstance(values, str):
                 # Check if it's a numeric string — don't quote numeric values
                 try:
@@ -114,7 +115,7 @@ def build_filter_sql(filters):
                     filter_display.append(f"{display_label} {op} {values}")
                 except ValueError:
                     filter_conditions.append(f"{dim} = '{values}'")
-                    filter_display.append(f"{display_label}: {values}")
+                    filter_display.append(f"{values} ({display_label})")
             elif isinstance(values, (int, float)):
                 filter_conditions.append(f"{dim} {op} {values}")
                 filter_display.append(f"{display_label} {op} {values}")
@@ -150,11 +151,11 @@ def build_param_info(metrics, breakout1, breakout2, filter_display):
             value=f"Breakouts: {', '.join(breakouts)}"
         ))
 
-    # Filter pill — use key "other_filters" to override platform auto-generated pill
+    # Filter pill — key must be "filters" (not parameter name "other_filters")
     if filter_display:
         param_info.append(ParameterDisplayDescription(
-            key="other_filters",
-            value=f"Filters: {'; '.join(filter_display)}"
+            key="filters",
+            value=f"Filter: {', '.join(filter_display)}"
         ))
 
     return param_info
