@@ -450,6 +450,16 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
             else:
                 metric_selects.append(f"AVG({m}) * 100 AS {m}")
 
+        # Combo/AND logic: when 2-3 binary respondent metrics, compute intersection
+        combo_binary = [m for m in metrics if m in RESPONDENT_METRICS and m not in NUMERIC_METRICS]
+        add_combo = len(combo_binary) >= 2 and len(combo_binary) <= 3 and not group_cols
+        if add_combo:
+            and_condition = " AND ".join(f"{m}=1" for m in combo_binary)
+            metric_selects.append(
+                f"SUM(CASE WHEN {and_condition} THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS combo_both"
+            )
+            print(f"DEBUG: Adding combo AND metric: {and_condition}")
+
         filter_sql, filter_display = build_filter_sql(filters)
         param_info = build_param_info(metrics, breakout1, breakout2, filter_display)
 
@@ -507,6 +517,17 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         total = df['respondent_count'].sum()
         df['respondent_share'] = (df['respondent_count'] / total * 100).round(1)
         metrics.append('respondent_share')
+
+    # Add combo/AND metric to output if computed
+    if 'combo_both' in df.columns:
+        combo_labels = [get_label(m) for m in combo_binary]
+        if len(combo_labels) == 2:
+            combo_label = f"Both {combo_labels[0]} & {combo_labels[1]}"
+        else:
+            combo_label = "All: " + ", ".join(combo_labels)
+        METRIC_LABELS['combo_both'] = combo_label
+        metrics.append('combo_both')
+        print(f"DEBUG: combo_both = {df['combo_both'].iloc[0]:.1f}%")
 
     # Convert to 100% distribution when a full metric group is requested with no breakout
     # e.g., all brain_health_interests → show each area's share of total responses
