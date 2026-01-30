@@ -87,7 +87,7 @@ RESPONDENT_METRICS = {
 CALCULATED_METRICS = {
     # Example: % of users among those aware
     "pct_users_among_aware": {
-        "sql": "AVG(CASE WHEN brand_aware = 1 THEN is_user ELSE NULL END)",
+        "sql": "SUM(CASE WHEN brand_aware = 1 THEN CAST(is_user AS DOUBLE) * weight ELSE NULL END) / NULLIF(SUM(CASE WHEN brand_aware = 1 THEN weight ELSE NULL END), 0)",
         "is_pct": True
     }
 }

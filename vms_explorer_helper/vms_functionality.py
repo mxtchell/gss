@@ -228,13 +228,13 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
             # Exclude NULL values in breakout columns (e.g., usage_level=None for respondents with no usage data)
             null_filters = " AND ".join(f"{col} IS NOT NULL" for col in group_cols)
             sql_query = f"""
-            SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count
+            SELECT {', '.join(group_cols)}, SUM(weight) AS respondent_count
             FROM {TABLE_NAME} WHERE 1=1{filter_sql} AND {null_filters}
             GROUP BY {', '.join(group_cols)}
             """
         else:
             sql_query = f"""
-            SELECT COUNT(*) AS respondent_count
+            SELECT SUM(weight) AS respondent_count
             FROM {TABLE_NAME} WHERE 1=1{filter_sql}
             """
 
@@ -327,14 +327,14 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
 
     # Build metric select expressions
     def brand_metric_select(metric):
-        """Brand metrics: use SUM/COUNT(*) to include NULLs in denominator"""
-        return f"SUM(CAST({metric} AS DOUBLE)) * 100.0 / COUNT(*) AS {metric}"
+        """Brand metrics: weighted SUM/SUM(weight) to include NULLs in denominator"""
+        return f"SUM(CAST({metric} AS DOUBLE) * weight) * 100.0 / SUM(weight) AS {metric}"
 
     def respondent_metric_select(metric):
-        """Respondent metrics: always AVG (dedup handled by CTE when needed)"""
+        """Respondent metrics: weighted (dedup handled by CTE when needed)"""
         if metric in NUMERIC_METRICS:
-            return f"AVG({metric}) AS {metric}"
-        return f"AVG({metric}) * 100 AS {metric}"
+            return f"SUM({metric} * weight) / SUM(weight) AS {metric}"
+        return f"SUM({metric} * weight) * 100.0 / SUM(weight) AS {metric}"
 
     def calc_metric_select(metric):
         calc_def = CALCULATED_METRICS[metric]
@@ -361,7 +361,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
 
         sql_query = f"""
             WITH resp_dedup AS (
-                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {resp_cols}
+                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {resp_cols}, weight
                 FROM {TABLE_NAME} WHERE is_user = 1{{filter_placeholder}}
             ),
             resp_agg AS (
@@ -370,7 +370,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
                 GROUP BY {', '.join(group_cols)}
             ),
             brand_agg AS (
-                SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {brand_sel}{', ' + ', '.join(calc_selects) if calc_selects else ''}
+                SELECT {', '.join(group_cols)}, SUM(weight) AS respondent_count, {brand_sel}{', ' + ', '.join(calc_selects) if calc_selects else ''}
                 FROM {TABLE_NAME} WHERE 1=1{{filter_placeholder}}
                 GROUP BY {', '.join(group_cols)}
             )
@@ -404,10 +404,10 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
 
         sql_query = f"""
             WITH unique_respondents AS (
-                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(respondent_metrics_requested)}
+                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(respondent_metrics_requested)}, weight
                 FROM {TABLE_NAME} WHERE is_user = 1{filter_sql}
             )
-            SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(all_selects)}
+            SELECT {', '.join(group_cols)}, SUM(weight) AS respondent_count, {', '.join(all_selects)}
             FROM unique_respondents
             GROUP BY {', '.join(group_cols)} ORDER BY {metrics[0]} DESC
         """
@@ -423,18 +423,18 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
             elif m in CALCULATED_METRICS:
                 metric_selects.append(calc_metric_select(m))
             elif m in NUMERIC_METRICS:
-                metric_selects.append(f"AVG({m}) AS {m}")
+                metric_selects.append(f"SUM({m} * weight) / SUM(weight) AS {m}")
             else:
-                metric_selects.append(f"AVG({m}) * 100 AS {m}")
+                metric_selects.append(f"SUM({m} * weight) * 100.0 / SUM(weight) AS {m}")
 
         if group_cols:
             sql_query = f"""
-            SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(metric_selects)}
+            SELECT {', '.join(group_cols)}, SUM(weight) AS respondent_count, {', '.join(metric_selects)}
             FROM {TABLE_NAME} WHERE 1=1
             """
         else:
             sql_query = f"""
-            SELECT COUNT(*) AS respondent_count, {', '.join(metric_selects)}
+            SELECT SUM(weight) AS respondent_count, {', '.join(metric_selects)}
             FROM {TABLE_NAME} WHERE 1=1
             """
 
@@ -446,9 +446,9 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
             if m in CALCULATED_METRICS:
                 metric_selects.append(calc_metric_select(m))
             elif m in NUMERIC_METRICS:
-                metric_selects.append(f"AVG({m}) AS {m}")
+                metric_selects.append(f"SUM({m} * weight) / SUM(weight) AS {m}")
             else:
-                metric_selects.append(f"AVG({m}) * 100 AS {m}")
+                metric_selects.append(f"SUM({m} * weight) * 100.0 / SUM(weight) AS {m}")
 
         # Combo/AND logic: when 2-3 binary respondent metrics, compute intersection
         combo_binary = [m for m in metrics if m in RESPONDENT_METRICS and m not in NUMERIC_METRICS]
@@ -456,7 +456,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         if add_combo:
             and_condition = " AND ".join(f"{m}=1" for m in combo_binary)
             metric_selects.append(
-                f"SUM(CASE WHEN {and_condition} THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS combo_both"
+                f"SUM(CASE WHEN {and_condition} THEN weight ELSE 0 END) * 100.0 / SUM(weight) AS combo_both"
             )
             print(f"DEBUG: Adding combo AND metric: {and_condition}")
 
@@ -467,20 +467,20 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
         if group_cols:
             sql_query = f"""
             WITH unique_respondents AS (
-                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(dedup_cols)}
+                SELECT DISTINCT respondent_id, {', '.join(group_cols)}, {', '.join(dedup_cols)}, weight
                 FROM {TABLE_NAME} WHERE 1=1{filter_sql}
             )
-            SELECT {', '.join(group_cols)}, COUNT(*) AS respondent_count, {', '.join(metric_selects)}
+            SELECT {', '.join(group_cols)}, SUM(weight) AS respondent_count, {', '.join(metric_selects)}
             FROM unique_respondents
             GROUP BY {', '.join(group_cols)} ORDER BY {metrics[0]} DESC
             """
         else:
             sql_query = f"""
             WITH unique_respondents AS (
-                SELECT DISTINCT respondent_id, {', '.join(dedup_cols)}
+                SELECT DISTINCT respondent_id, {', '.join(dedup_cols)}, weight
                 FROM {TABLE_NAME} WHERE 1=1{filter_sql}
             )
-            SELECT COUNT(*) AS respondent_count, {', '.join(metric_selects)}
+            SELECT SUM(weight) AS respondent_count, {', '.join(metric_selects)}
             FROM unique_respondents
             """
         is_mixed_query = True
@@ -534,7 +534,7 @@ def run_vms_analysis(parameters: SkillInput) -> SkillOutput:
             user_filter_sql, _ = build_filter_sql(user_filters)
             null_filters = " AND ".join(f"{col} IS NOT NULL" for col in group_cols)
             user_count_sql = f"""
-            SELECT {', '.join(group_cols)}, COUNT(*) AS user_count
+            SELECT {', '.join(group_cols)}, SUM(weight) AS user_count
             FROM {TABLE_NAME} WHERE 1=1{user_filter_sql} AND {null_filters}
             GROUP BY {', '.join(group_cols)}
             """
