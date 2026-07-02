@@ -1,28 +1,211 @@
 """
-Reckitt Price-Volume-Mix Driver Analysis
+Reckitt Price-Volume-Mix Driver Analysis Skill
 
-Adapted from FPA metric_drivers.py for Reckitt Surface Care POC data.
 Uses net_revenue with units as volume to derive price for PVM decomposition.
-
-Data structure:
-- Revenue: net_revenue (Reckitt brands only)
-- Volume: units (from Nielsen)
-- Price: net_revenue / units (derived)
-- Dimensions: brand, sub_category, segment, channel, state_name
-- Time: quarter (Q2'25, Q3'25, Q4'25, Q1'26, Q2'26)
+Reckitt brands only (they have finance metrics).
 """
 
 from __future__ import annotations
+from skill_framework import skill, SkillParameter, SkillInput, SkillOutput, SkillVisualization
+from skill_framework.layouts import wire_layout
 import pandas as pd
 import numpy as np
 import json
 import logging
-from datetime import datetime
+import os
 
 logger = logging.getLogger(__name__)
 
-# Default data path
-DEFAULT_DATA_PATH = "/Users/mitchelltravis/cursor/reckitt_poc_data/reckitt_surface_care_poc.csv"
+# Database Configuration - update these for your environment
+DATABASE_ID = os.getenv('DATABASE_ID', '')
+DATA_FILE = 'reckitt_surface_care_poc.csv'
+
+# Prompt templates
+DEFAULT_MAX_PROMPT = """
+Based on the following Price-Volume-Mix analysis:
+{% for fact in facts %}
+- {{ fact }}
+{% endfor %}
+
+Provide a concise executive summary (2-3 sentences) highlighting the key variance drivers.
+"""
+
+DEFAULT_INSIGHT_PROMPT = """
+Analyze the following Price-Volume-Mix variance data:
+{% for fact in facts %}
+- {{ fact }}
+{% endfor %}
+
+Provide detailed insights covering:
+1. Key variance drivers (Volume, Price, Mix)
+2. Top contributing dimensions (brands, channels, regions)
+3. Actionable recommendations for stakeholders
+4. Areas requiring immediate attention
+
+Format the insights in clear markdown with bullet points.
+"""
+
+# Waterfall chart layout
+WATERFALL_CHART_LAYOUT = """
+{
+    "layoutJson": {
+        "type": "Document",
+        "rows": 90,
+        "columns": 160,
+        "rowHeight": "1.11%",
+        "colWidth": "0.625%",
+        "gap": "0px",
+        "style": {
+            "backgroundColor": "#ffffff",
+            "width": "100%",
+            "height": "max-content",
+            "padding": "15px",
+            "gap": "20px"
+        },
+        "children": [
+            {
+                "name": "CardContainer0",
+                "type": "CardContainer",
+                "children": "",
+                "minHeight": "80px",
+                "rows": 2,
+                "columns": 1,
+                "style": {
+                    "border-radius": "11.911px",
+                    "background": "#2563EB",
+                    "padding": "10px",
+                    "fontFamily": "Arial"
+                },
+                "hidden": false
+            },
+            {
+                "name": "Header0",
+                "type": "Header",
+                "children": "",
+                "text": "Variance Analysis",
+                "style": {
+                    "fontSize": "20px",
+                    "fontWeight": "700",
+                    "color": "#ffffff",
+                    "textAlign": "left",
+                    "alignItems": "center"
+                },
+                "parentId": "CardContainer0",
+                "hidden": false
+            },
+            {
+                "name": "Paragraph0",
+                "type": "Paragraph",
+                "children": "",
+                "text": "Price-Volume-Mix Decomposition",
+                "style": {
+                    "fontSize": "15px",
+                    "fontWeight": "normal",
+                    "textAlign": "center",
+                    "verticalAlign": "start",
+                    "color": "#fafafa",
+                    "alignItems": "center"
+                },
+                "parentId": "CardContainer0",
+                "hidden": false
+            },
+            {
+                "name": "HighchartsChart0",
+                "type": "HighchartsChart",
+                "minHeight": "500px",
+                "chartOptions": {},
+                "options": {
+                    "chart": {
+                        "type": "waterfall",
+                        "height": 500
+                    },
+                    "title": {
+                        "text": ""
+                    },
+                    "xAxis": {
+                        "categories": []
+                    },
+                    "yAxis": {
+                        "title": {
+                            "text": ""
+                        }
+                    },
+                    "series": [],
+                    "credits": {
+                        "enabled": false
+                    },
+                    "legend": {
+                        "enabled": false
+                    },
+                    "tooltip": {
+                        "shared": true,
+                        "backgroundColor": "rgba(255, 255, 255, 1)",
+                        "useHTML": false
+                    }
+                },
+                "hidden": false
+            },
+            {
+                "name": "DataTable0",
+                "type": "DataTable",
+                "children": "",
+                "columns": [],
+                "data": [],
+                "caption": "",
+                "styles": {
+                    "td": {
+                        "vertical-align": "middle"
+                    }
+                }
+            }
+        ]
+    },
+    "inputVariables": [
+        {
+            "name": "sub_headline",
+            "isRequired": false,
+            "defaultValue": null,
+            "targets": [{"elementName": "Paragraph0", "fieldName": "text"}]
+        },
+        {
+            "name": "headline",
+            "isRequired": false,
+            "defaultValue": null,
+            "targets": [{"elementName": "Header0", "fieldName": "text"}]
+        },
+        {
+            "name": "chart_categories",
+            "isRequired": false,
+            "defaultValue": null,
+            "targets": [{"elementName": "HighchartsChart0", "fieldName": "options.xAxis.categories"}]
+        },
+        {
+            "name": "chart_y_axis",
+            "isRequired": false,
+            "defaultValue": null,
+            "targets": [{"elementName": "HighchartsChart0", "fieldName": "options.yAxis"}]
+        },
+        {
+            "name": "chart_data",
+            "isRequired": false,
+            "defaultValue": null,
+            "targets": [{"elementName": "HighchartsChart0", "fieldName": "options.series"}]
+        },
+        {
+            "name": "data",
+            "isRequired": false,
+            "defaultValue": null,
+            "targets": [{"elementName": "DataTable0", "fieldName": "data"}]
+        },
+        {
+            "name": "col_defs",
+            "isRequired": false,
+            "defaultValue": null,
+            "targets": [{"elementName": "DataTable0", "fieldName": "columns"}]
+        }
+    ]
+}
+"""
 
 
 def format_number(value, is_currency=True, decimals=1):
@@ -59,8 +242,6 @@ def format_display_name(name):
         'gross_margin': 'Gross Margin',
         'sub_category': 'Sub-Category',
         'state_name': 'State',
-        'country_name': 'Country',
-        'household_penetration': 'HH Penetration',
     }
 
     if name.lower() in special_cases:
@@ -69,512 +250,473 @@ def format_display_name(name):
     return name.replace('_', ' ').title()
 
 
-class ReckittPVMAnalysis:
-    """Price-Volume-Mix Analysis for Reckitt Surface Care Data
+def build_filter_clause(filters):
+    """Build SQL WHERE clause from filters"""
+    clauses = []
+    if filters:
+        for filter_dict in filters:
+            dim = filter_dict.get('dim')
+            op = filter_dict.get('op', '=')
+            val = filter_dict.get('val')
 
-    Uses net_revenue as revenue metric and units as volume to derive price.
-    Formula:
-    - Volume Impact = (Actual Units - Prior Units) × Prior Price
-    - Price Impact = (Actual Price - Prior Price) × Actual Units
-    - Mix Impact = Residual (captures portfolio shift)
-    """
-
-    def __init__(self, data_path=None, metric='net_revenue', current_period=None,
-                 prior_period=None, breakout_dimensions=None, top_n=10, filters=None):
-        self.data_path = data_path or DEFAULT_DATA_PATH
-        self.metric = metric  # net_revenue, gross_sales, or gross_margin
-        self.current_period = current_period  # e.g., "Q2'26"
-        self.prior_period = prior_period  # e.g., "Q2'25" for YoY
-        self.breakout_dimensions = breakout_dimensions or ['brand', 'sub_category', 'segment', 'channel', 'state_name']
-        self.top_n = top_n
-        self.filters = filters or {}
-
-        self.df = None
-        self.current_df = None
-        self.prior_df = None
-        self.pvm_results = None
-        self.breakout_results = {}
-        self.facts = []
-
-    def load_data(self):
-        """Load and filter data for Reckitt brands only (they have finance data)"""
-        logger.info(f"Loading data from {self.data_path}")
-
-        self.df = pd.read_csv(self.data_path)
-
-        # Filter to Reckitt brands only (they have net_revenue)
-        reckitt_df = self.df[self.df['manufacturer'] == 'RECKITT BENCKISER'].copy()
-
-        # Apply any additional filters
-        for col, val in self.filters.items():
-            if col in reckitt_df.columns:
+            if dim and val:
                 if isinstance(val, list):
-                    reckitt_df = reckitt_df[reckitt_df[col].isin(val)]
+                    if len(val) == 1:
+                        clauses.append(f"UPPER({dim}) {op} UPPER('{val[0]}')")
+                    else:
+                        val_str = ", ".join([f"UPPER('{v}')" for v in val])
+                        clauses.append(f"UPPER({dim}) IN ({val_str})")
+                elif isinstance(val, str):
+                    clauses.append(f"UPPER({dim}) {op} UPPER('{val}')")
                 else:
-                    reckitt_df = reckitt_df[reckitt_df[col] == val]
+                    clauses.append(f"{dim} {op} {val}")
 
-        # Filter by period
-        self.current_df = reckitt_df[reckitt_df['quarter'] == self.current_period].copy()
-        self.prior_df = reckitt_df[reckitt_df['quarter'] == self.prior_period].copy()
+    return " AND " + " AND ".join(clauses) if clauses else ""
 
-        logger.info(f"Current period ({self.current_period}): {len(self.current_df):,} rows")
-        logger.info(f"Prior period ({self.prior_period}): {len(self.prior_df):,} rows")
 
-        if self.current_df.empty:
-            raise ValueError(f"No data found for current period: {self.current_period}")
-        if self.prior_df.empty:
-            raise ValueError(f"No data found for prior period: {self.prior_period}")
+def run_pvm_analysis(client, metric, current_period, prior_period, breakout_dimensions, filters):
+    """Run Price-Volume-Mix analysis"""
 
-    def calculate_price_volume_mix(self):
-        """
-        Calculate Price-Volume-Mix decomposition using category-level detail
+    filter_clause = build_filter_clause(filters)
 
-        Uses units as volume and derives price = net_revenue / units
+    # Query current period data (Reckitt brands only)
+    current_query = f"""
+    SELECT brand, sub_category, segment, channel, state_name,
+           SUM({metric}) as revenue,
+           SUM(units) as units
+    FROM read_csv('{DATA_FILE}')
+    WHERE manufacturer = 'RECKITT BENCKISER'
+    AND quarter = '{current_period}'
+    {filter_clause}
+    GROUP BY brand, sub_category, segment, channel, state_name
+    """
 
-        Formula:
-        - Volume Impact = (Actual Units - Prior Units) × Prior Avg Price
-        - Mix Impact = Change in category shares × Prior prices × Actual volume
-        - Price Impact = Residual
-        """
-        logger.info("Calculating Price-Volume-Mix decomposition")
+    logger.info(f"Current period query: {current_query}")
+    result = client.data.execute_sql_query(
+        database_id=DATABASE_ID,
+        sql_query=current_query,
+        row_limit=50000
+    )
 
-        # Use the first breakout dimension for mix calculation (typically brand)
-        mix_dimension = self.breakout_dimensions[0] if self.breakout_dimensions else 'brand'
+    if not result.success or not hasattr(result, 'df') or result.df.empty:
+        raise ValueError(f"No data found for current period: {current_period}")
 
-        # Calculate totals
-        actual_revenue = self.current_df[self.metric].sum()
-        prior_revenue = self.prior_df[self.metric].sum()
-        total_variance = actual_revenue - prior_revenue
+    current_df = result.df.copy()
 
-        actual_units = self.current_df['units'].sum()
-        prior_units = self.prior_df['units'].sum()
+    # Query prior period data
+    prior_query = f"""
+    SELECT brand, sub_category, segment, channel, state_name,
+           SUM({metric}) as revenue,
+           SUM(units) as units
+    FROM read_csv('{DATA_FILE}')
+    WHERE manufacturer = 'RECKITT BENCKISER'
+    AND quarter = '{prior_period}'
+    {filter_clause}
+    GROUP BY brand, sub_category, segment, channel, state_name
+    """
 
-        # Category-level PVM calculation
-        if mix_dimension in self.current_df.columns:
-            logger.info(f"Using category-level PVM with dimension: {mix_dimension}")
+    logger.info(f"Prior period query: {prior_query}")
+    result = client.data.execute_sql_query(
+        database_id=DATABASE_ID,
+        sql_query=prior_query,
+        row_limit=50000
+    )
 
-            # Aggregate by category
-            actual_by_cat = self.current_df.groupby(mix_dimension).agg({
-                self.metric: 'sum',
-                'units': 'sum'
-            }).reset_index()
-            actual_by_cat['price'] = actual_by_cat[self.metric] / actual_by_cat['units'].replace(0, np.nan)
-            actual_by_cat['price'] = actual_by_cat['price'].fillna(0)
+    if not result.success or not hasattr(result, 'df') or result.df.empty:
+        raise ValueError(f"No data found for prior period: {prior_period}")
 
-            prior_by_cat = self.prior_df.groupby(mix_dimension).agg({
-                self.metric: 'sum',
-                'units': 'sum'
-            }).reset_index()
-            prior_by_cat['price'] = prior_by_cat[self.metric] / prior_by_cat['units'].replace(0, np.nan)
-            prior_by_cat['price'] = prior_by_cat['price'].fillna(0)
+    prior_df = result.df.copy()
 
-            # Merge to align categories
-            merged = pd.merge(
-                actual_by_cat,
-                prior_by_cat,
-                on=mix_dimension,
-                how='outer',
-                suffixes=('_actual', '_prior')
-            ).fillna(0)
+    # Calculate PVM
+    actual_revenue = current_df['revenue'].sum()
+    prior_revenue = prior_df['revenue'].sum()
+    total_variance = actual_revenue - prior_revenue
 
-            # Calculate total volumes
-            total_actual_units = actual_by_cat['units'].sum()
-            total_prior_units = prior_by_cat['units'].sum()
+    actual_units = current_df['units'].sum()
+    prior_units = prior_df['units'].sum()
 
-            # Step 1: Mix Impact - change in category shares at prior prices
-            mix_impact = 0
-            for _, row in merged.iterrows():
-                actual_share = row['units_actual'] / total_actual_units if total_actual_units > 0 else 0
-                prior_share = row['units_prior'] / total_prior_units if total_prior_units > 0 else 0
-                share_change = actual_share - prior_share
-                mix_impact += share_change * row['price_prior'] * total_actual_units
+    # Use first breakout dimension for mix calculation
+    mix_dimension = breakout_dimensions[0] if breakout_dimensions else 'brand'
 
-            # Step 2: Volume Impact - total volume change at prior average price
-            prior_avg_price = prior_revenue / total_prior_units if total_prior_units > 0 else 0
-            volume_impact = (total_actual_units - total_prior_units) * prior_avg_price
+    # Aggregate by mix dimension
+    actual_by_dim = current_df.groupby(mix_dimension).agg({
+        'revenue': 'sum',
+        'units': 'sum'
+    }).reset_index()
+    actual_by_dim['price'] = actual_by_dim['revenue'] / actual_by_dim['units'].replace(0, np.nan)
+    actual_by_dim['price'] = actual_by_dim['price'].fillna(0)
 
-            # Step 3: Price is residual
-            price_impact = total_variance - volume_impact - mix_impact
+    prior_by_dim = prior_df.groupby(mix_dimension).agg({
+        'revenue': 'sum',
+        'units': 'sum'
+    }).reset_index()
+    prior_by_dim['price'] = prior_by_dim['revenue'] / prior_by_dim['units'].replace(0, np.nan)
+    prior_by_dim['price'] = prior_by_dim['price'].fillna(0)
 
-        else:
-            # Simple aggregate calculation
-            logger.info("Using simple aggregate PVM calculation")
+    # Merge
+    merged = pd.merge(
+        actual_by_dim,
+        prior_by_dim,
+        on=mix_dimension,
+        how='outer',
+        suffixes=('_actual', '_prior')
+    ).fillna(0)
 
-            actual_price = actual_revenue / actual_units if actual_units > 0 else 0
-            prior_price = prior_revenue / prior_units if prior_units > 0 else 0
+    total_actual_units = actual_by_dim['units'].sum()
+    total_prior_units = prior_by_dim['units'].sum()
 
-            volume_impact = (actual_units - prior_units) * prior_price
-            price_impact = (actual_price - prior_price) * actual_units
-            mix_impact = total_variance - volume_impact - price_impact
+    # Mix Impact
+    mix_impact = 0
+    for _, row in merged.iterrows():
+        actual_share = row['units_actual'] / total_actual_units if total_actual_units > 0 else 0
+        prior_share = row['units_prior'] / total_prior_units if total_prior_units > 0 else 0
+        share_change = actual_share - prior_share
+        mix_impact += share_change * row['price_prior'] * total_actual_units
 
-        logger.info(f"PVM: Volume={volume_impact:,.0f}, Price={price_impact:,.0f}, Mix={mix_impact:,.0f}")
+    # Volume Impact
+    prior_avg_price = prior_revenue / total_prior_units if total_prior_units > 0 else 0
+    volume_impact = (total_actual_units - total_prior_units) * prior_avg_price
 
-        self.pvm_results = {
-            'starting_value': prior_revenue,
-            'volume_impact': volume_impact,
-            'price_impact': price_impact,
-            'mix_impact': mix_impact,
-            'ending_value': actual_revenue,
-            'total_variance': total_variance,
-            'prior_units': prior_units,
-            'actual_units': actual_units,
-            'prior_price': prior_revenue / prior_units if prior_units > 0 else 0,
-            'actual_price': actual_revenue / actual_units if actual_units > 0 else 0
-        }
+    # Price Impact (residual)
+    price_impact = total_variance - volume_impact - mix_impact
 
-        # Create facts
-        pct_change = (total_variance / prior_revenue * 100) if prior_revenue != 0 else 0
-        self.facts.append({
-            'fact': f"Total {self.metric.replace('_', ' ').title()} variance: {format_number(total_variance)} ({pct_change:+.1f}%)",
-            'category': 'overall'
-        })
+    pvm_results = {
+        'starting_value': prior_revenue,
+        'volume_impact': volume_impact,
+        'price_impact': price_impact,
+        'mix_impact': mix_impact,
+        'ending_value': actual_revenue,
+        'total_variance': total_variance,
+        'prior_units': prior_units,
+        'actual_units': actual_units,
+        'prior_price': prior_avg_price,
+        'actual_price': actual_revenue / actual_units if actual_units > 0 else 0
+    }
 
-        if total_variance != 0:
-            self.facts.append({
-                'fact': f"Volume impact: {format_number(volume_impact)} ({volume_impact/abs(total_variance)*100:.1f}% of variance)",
-                'category': 'pvm'
-            })
-            self.facts.append({
-                'fact': f"Price impact: {format_number(price_impact)} ({price_impact/abs(total_variance)*100:.1f}% of variance)",
-                'category': 'pvm'
-            })
-            self.facts.append({
-                'fact': f"Mix impact: {format_number(mix_impact)} ({mix_impact/abs(total_variance)*100:.1f}% of variance)",
-                'category': 'pvm'
-            })
+    # Generate facts
+    facts = []
+    pct_change = (total_variance / prior_revenue * 100) if prior_revenue != 0 else 0
+    facts.append(f"Total {format_display_name(metric)} variance: {format_number(total_variance)} ({pct_change:+.1f}%)")
 
-        return self.pvm_results
+    if total_variance != 0:
+        facts.append(f"Volume impact: {format_number(volume_impact)} ({volume_impact/abs(total_variance)*100:.1f}% of variance)")
+        facts.append(f"Price impact: {format_number(price_impact)} ({price_impact/abs(total_variance)*100:.1f}% of variance)")
+        facts.append(f"Mix impact: {format_number(mix_impact)} ({mix_impact/abs(total_variance)*100:.1f}% of variance)")
 
-    def calculate_dimensional_breakout(self, dimension):
-        """Calculate variance attribution by dimension"""
-        logger.info(f"Calculating breakout for dimension: {dimension}")
+    # Top contributors by dimension
+    for dim in breakout_dimensions[:2]:
+        if dim in current_df.columns:
+            actual_agg = current_df.groupby(dim)['revenue'].sum().reset_index()
+            actual_agg.columns = [dim, 'actual']
+            prior_agg = prior_df.groupby(dim)['revenue'].sum().reset_index()
+            prior_agg.columns = [dim, 'prior']
 
-        if dimension not in self.current_df.columns:
-            logger.warning(f"Dimension {dimension} not found in data")
-            return None
+            dim_merged = pd.merge(actual_agg, prior_agg, on=dim, how='outer').fillna(0)
+            dim_merged['variance'] = dim_merged['actual'] - dim_merged['prior']
+            dim_merged['variance_pct'] = (dim_merged['variance'] / dim_merged['prior'].replace(0, np.nan) * 100).fillna(0)
+            dim_merged = dim_merged.sort_values('variance', key=abs, ascending=False)
 
-        # Aggregate by dimension
-        actual_agg = self.current_df.groupby(dimension).agg({
-            self.metric: 'sum',
-            'units': 'sum'
-        }).reset_index()
-        actual_agg.columns = [dimension, 'actual_revenue', 'actual_units']
+            for _, row in dim_merged.head(3).iterrows():
+                direction = "increased" if row['variance'] > 0 else "decreased"
+                facts.append(f"{format_display_name(dim)} '{row[dim]}': {format_number(row['variance'])} ({row['variance_pct']:+.1f}%) - {direction}")
 
-        prior_agg = self.prior_df.groupby(dimension).agg({
-            self.metric: 'sum',
-            'units': 'sum'
-        }).reset_index()
-        prior_agg.columns = [dimension, 'prior_revenue', 'prior_units']
+    return pvm_results, facts, current_df, prior_df
 
-        merged = pd.merge(actual_agg, prior_agg, on=dimension, how='outer').fillna(0)
 
-        # Calculate derived metrics
-        merged['actual_price'] = merged['actual_revenue'] / merged['actual_units'].replace(0, np.nan)
-        merged['prior_price'] = merged['prior_revenue'] / merged['prior_units'].replace(0, np.nan)
-        merged['actual_price'] = merged['actual_price'].fillna(0)
-        merged['prior_price'] = merged['prior_price'].fillna(0)
+def create_waterfall_chart(pvm_results, current_period, prior_period, metric):
+    """Create waterfall chart data"""
 
-        merged['variance'] = merged['actual_revenue'] - merged['prior_revenue']
-        merged['variance_pct'] = (merged['variance'] / merged['prior_revenue'].replace(0, np.nan) * 100).fillna(0)
+    categories = [prior_period, "Volume", "Price", "Mix", current_period]
 
-        merged['units_change'] = merged['actual_units'] - merged['prior_units']
-        merged['price_change'] = merged['actual_price'] - merged['prior_price']
+    def get_color(value):
+        return '#4ade80' if value >= 0 else '#ef4444'
 
-        # Rank by absolute variance
-        merged['abs_variance'] = merged['variance'].abs()
-        merged = merged.sort_values('abs_variance', ascending=False)
+    volume_val = pvm_results['volume_impact']
+    price_val = pvm_results['price_impact']
+    mix_val = pvm_results['mix_impact']
 
-        # Take top N
-        top_n_df = merged.head(self.top_n).copy()
-        self.breakout_results[dimension] = top_n_df
+    scale = 1_000_000 if abs(pvm_results['starting_value']) >= 1_000_000 else 1_000
 
-        # Add facts for top contributors
-        for _, row in top_n_df.head(3).iterrows():
-            direction = "increased" if row['variance'] > 0 else "decreased"
-            self.facts.append({
-                'fact': f"{dimension.replace('_', ' ').title()} '{row[dimension]}': {format_number(row['variance'])} ({row['variance_pct']:+.1f}%) - {direction}",
-                'category': f'breakout_{dimension}'
-            })
-
-        return top_n_df
-
-    def create_waterfall_chart_data(self):
-        """Create Highcharts waterfall chart configuration"""
-        if not self.pvm_results:
-            return None
-
-        categories = [
-            self.prior_period,
-            "Volume",
-            "Price",
-            "Mix",
-            self.current_period
-        ]
-
-        metric_display = format_display_name(self.metric)
-
-        def get_color(value):
-            return '#4ade80' if value >= 0 else '#ef4444'
-
-        volume_val = self.pvm_results['volume_impact']
-        price_val = self.pvm_results['price_impact']
-        mix_val = self.pvm_results['mix_impact']
-
-        # Scale for display
-        scale = 1_000_000 if abs(self.pvm_results['starting_value']) >= 1_000_000 else 1_000
-        scale_label = 'M' if scale == 1_000_000 else 'K'
-
-        starting_scaled = self.pvm_results['starting_value'] / scale
-        volume_scaled = volume_val / scale
-        price_scaled = price_val / scale
-        mix_scaled = mix_val / scale
-        ending_scaled = self.pvm_results['ending_value'] / scale
-
-        data_series = [{
-            'name': metric_display,
-            'data': [
-                {
-                    'name': self.prior_period,
-                    'y': starting_scaled,
-                    'color': '#3b82f6',
-                    'dataLabels': {'enabled': True, 'format': format_number(self.pvm_results['starting_value'])}
-                },
-                {
-                    'name': 'Volume',
-                    'y': volume_scaled,
-                    'color': get_color(volume_val),
-                    'dataLabels': {'enabled': True, 'format': format_number(volume_val)}
-                },
-                {
-                    'name': 'Price',
-                    'y': price_scaled,
-                    'color': get_color(price_val),
-                    'dataLabels': {'enabled': True, 'format': format_number(price_val)}
-                },
-                {
-                    'name': 'Mix',
-                    'y': mix_scaled,
-                    'color': get_color(mix_val),
-                    'dataLabels': {'enabled': True, 'format': format_number(mix_val)}
-                },
-                {
-                    'name': self.current_period,
-                    'isSum': True,
-                    'y': ending_scaled,
-                    'color': '#3b82f6',
-                    'dataLabels': {'enabled': True, 'format': format_number(self.pvm_results['ending_value'])}
-                }
-            ],
-            'dataLabels': {
-                'enabled': True,
-                'style': {'fontWeight': 'bold', 'color': '#000000', 'textOutline': 'none'}
+    data_series = [{
+        'name': format_display_name(metric),
+        'data': [
+            {
+                'name': prior_period,
+                'y': pvm_results['starting_value'] / scale,
+                'color': '#3b82f6',
+                'dataLabels': {'enabled': True, 'format': format_number(pvm_results['starting_value'])}
+            },
+            {
+                'name': 'Volume',
+                'y': volume_val / scale,
+                'color': get_color(volume_val),
+                'dataLabels': {'enabled': True, 'format': format_number(volume_val)}
+            },
+            {
+                'name': 'Price',
+                'y': price_val / scale,
+                'color': get_color(price_val),
+                'dataLabels': {'enabled': True, 'format': format_number(price_val)}
+            },
+            {
+                'name': 'Mix',
+                'y': mix_val / scale,
+                'color': get_color(mix_val),
+                'dataLabels': {'enabled': True, 'format': format_number(mix_val)}
+            },
+            {
+                'name': current_period,
+                'isSum': True,
+                'y': pvm_results['ending_value'] / scale,
+                'color': '#3b82f6',
+                'dataLabels': {'enabled': True, 'format': format_number(pvm_results['ending_value'])}
             }
-        }]
-
-        return {
-            'chart_categories': categories,
-            'chart_data': data_series,
-            'chart_y_axis': {
-                'title': {'text': f'{metric_display} (${scale_label})'},
-                'labels': {'format': '${value:,.0f}' + scale_label}
-            },
-            'chart_title': f'{metric_display} Price-Volume-Mix Bridge'
+        ],
+        'dataLabels': {
+            'enabled': True,
+            'style': {'fontWeight': 'bold', 'color': '#000000', 'textOutline': 'none'}
         }
+    }]
 
-    def create_horizontal_bar_chart_data(self, dimension):
-        """Create horizontal bar chart for dimension breakout"""
-        if dimension not in self.breakout_results:
-            return None
+    scale_label = 'M' if scale == 1_000_000 else 'K'
 
-        df = self.breakout_results[dimension]
-        scale = 1_000_000 if df['actual_revenue'].abs().max() >= 1_000_000 else 1_000
-
-        categories = df[dimension].tolist()
-        actual_data = [x / scale for x in df['actual_revenue'].tolist()]
-        prior_data = [x / scale for x in df['prior_revenue'].tolist()]
-
-        return {
-            'chart_categories': categories,
-            'chart_data': [
-                {'name': self.current_period, 'data': actual_data, 'color': '#5DADE2'},
-                {'name': self.prior_period, 'data': prior_data, 'color': '#F8C471'}
-            ],
-            'chart_y_axis': {
-                'title': {'text': format_display_name(self.metric)},
-                'labels': {'format': '${value:,.0f}' + ('M' if scale == 1_000_000 else 'K')}
-            },
-            'chart_title': f'{format_display_name(dimension)} Variance Analysis'
+    return {
+        'chart_categories': categories,
+        'chart_data': data_series,
+        'chart_y_axis': {
+            'title': {'text': f'{format_display_name(metric)} (${scale_label})'},
+            'labels': {'format': '${value:,.0f}' + scale_label}
         }
+    }
 
-    def get_summary_table(self):
-        """Create summary table with key metrics"""
-        if not self.pvm_results:
-            return None
 
-        data = [
-            [
-                format_display_name(self.metric),
-                format_number(self.pvm_results['ending_value']),
-                format_number(self.pvm_results['starting_value']),
-                format_number(self.pvm_results['total_variance']),
-                f"{self.pvm_results['total_variance'] / self.pvm_results['starting_value'] * 100:+.1f}%" if self.pvm_results['starting_value'] != 0 else "N/A"
-            ],
-            [
-                "Units",
-                f"{self.pvm_results['actual_units']:,.0f}",
-                f"{self.pvm_results['prior_units']:,.0f}",
-                f"{self.pvm_results['actual_units'] - self.pvm_results['prior_units']:+,.0f}",
-                f"{(self.pvm_results['actual_units'] - self.pvm_results['prior_units']) / self.pvm_results['prior_units'] * 100:+.1f}%" if self.pvm_results['prior_units'] != 0 else "N/A"
-            ],
-            [
-                "Price ($/Unit)",
-                f"${self.pvm_results['actual_price']:.2f}",
-                f"${self.pvm_results['prior_price']:.2f}",
-                f"${self.pvm_results['actual_price'] - self.pvm_results['prior_price']:+.2f}",
-                f"{(self.pvm_results['actual_price'] - self.pvm_results['prior_price']) / self.pvm_results['prior_price'] * 100:+.1f}%" if self.pvm_results['prior_price'] != 0 else "N/A"
-            ],
-            ["", "", "", "", ""],
-            [
-                "Volume Impact",
-                "", "",
-                format_number(self.pvm_results['volume_impact']),
-                f"{self.pvm_results['volume_impact'] / abs(self.pvm_results['total_variance']) * 100:.1f}% of variance" if self.pvm_results['total_variance'] != 0 else "N/A"
-            ],
-            [
-                "Price Impact",
-                "", "",
-                format_number(self.pvm_results['price_impact']),
-                f"{self.pvm_results['price_impact'] / abs(self.pvm_results['total_variance']) * 100:.1f}% of variance" if self.pvm_results['total_variance'] != 0 else "N/A"
-            ],
-            [
-                "Mix Impact",
-                "", "",
-                format_number(self.pvm_results['mix_impact']),
-                f"{self.pvm_results['mix_impact'] / abs(self.pvm_results['total_variance']) * 100:.1f}% of variance" if self.pvm_results['total_variance'] != 0 else "N/A"
-            ]
+def create_summary_table(pvm_results, current_period, prior_period):
+    """Create summary table"""
+
+    data = [
+        [
+            "Net Revenue",
+            format_number(pvm_results['ending_value']),
+            format_number(pvm_results['starting_value']),
+            format_number(pvm_results['total_variance']),
+            f"{pvm_results['total_variance'] / pvm_results['starting_value'] * 100:+.1f}%" if pvm_results['starting_value'] != 0 else "N/A"
+        ],
+        [
+            "Units",
+            f"{pvm_results['actual_units']:,.0f}",
+            f"{pvm_results['prior_units']:,.0f}",
+            f"{pvm_results['actual_units'] - pvm_results['prior_units']:+,.0f}",
+            f"{(pvm_results['actual_units'] - pvm_results['prior_units']) / pvm_results['prior_units'] * 100:+.1f}%" if pvm_results['prior_units'] != 0 else "N/A"
+        ],
+        [
+            "Price ($/Unit)",
+            f"${pvm_results['actual_price']:.2f}",
+            f"${pvm_results['prior_price']:.2f}",
+            f"${pvm_results['actual_price'] - pvm_results['prior_price']:+.2f}",
+            f"{(pvm_results['actual_price'] - pvm_results['prior_price']) / pvm_results['prior_price'] * 100:+.1f}%" if pvm_results['prior_price'] != 0 else "N/A"
+        ],
+        ["", "", "", "", ""],
+        [
+            "Volume Impact",
+            "", "",
+            format_number(pvm_results['volume_impact']),
+            f"{pvm_results['volume_impact'] / abs(pvm_results['total_variance']) * 100:.1f}%" if pvm_results['total_variance'] != 0 else "N/A"
+        ],
+        [
+            "Price Impact",
+            "", "",
+            format_number(pvm_results['price_impact']),
+            f"{pvm_results['price_impact'] / abs(pvm_results['total_variance']) * 100:.1f}%" if pvm_results['total_variance'] != 0 else "N/A"
+        ],
+        [
+            "Mix Impact",
+            "", "",
+            format_number(pvm_results['mix_impact']),
+            f"{pvm_results['mix_impact'] / abs(pvm_results['total_variance']) * 100:.1f}%" if pvm_results['total_variance'] != 0 else "N/A"
         ]
+    ]
 
-        columns = [
-            {'name': 'Metric'},
-            {'name': self.current_period},
-            {'name': self.prior_period},
-            {'name': 'Change'},
-            {'name': 'Change %'}
-        ]
+    columns = [
+        {'name': 'Metric'},
+        {'name': current_period},
+        {'name': prior_period},
+        {'name': 'Change'},
+        {'name': 'Change %'}
+    ]
 
-        return {'data': data, 'col_defs': columns}
-
-    def get_breakout_table(self, dimension):
-        """Create variance table for dimension breakout"""
-        if dimension not in self.breakout_results:
-            return None
-
-        df = self.breakout_results[dimension]
-
-        data = []
-        for _, row in df.iterrows():
-            data.append([
-                row[dimension],
-                format_number(row['actual_revenue']),
-                format_number(row['prior_revenue']),
-                format_number(row['variance']),
-                f"{row['variance_pct']:+.1f}%",
-                f"{row['units_change']:+,.0f}",
-                f"${row['price_change']:+.2f}" if not pd.isna(row['price_change']) else "N/A"
-            ])
-
-        columns = [
-            {'name': format_display_name(dimension)},
-            {'name': self.current_period},
-            {'name': self.prior_period},
-            {'name': 'Variance'},
-            {'name': 'Var %'},
-            {'name': 'Units Δ'},
-            {'name': 'Price Δ'}
-        ]
-
-        return {'data': data, 'col_defs': columns}
-
-    def run_analysis(self):
-        """Run complete PVM analysis"""
-        logger.info(f"Starting Reckitt PVM analysis: {self.current_period} vs {self.prior_period}")
-
-        self.load_data()
-        self.calculate_price_volume_mix()
-
-        for dim in self.breakout_dimensions:
-            self.calculate_dimensional_breakout(dim)
-
-        logger.info("Analysis complete")
-        return self
-
-    def print_summary(self):
-        """Print analysis summary to console"""
-        print("\n" + "="*60)
-        print(f"RECKITT PRICE-VOLUME-MIX ANALYSIS")
-        print(f"{self.current_period} vs {self.prior_period}")
-        print("="*60)
-
-        if self.pvm_results:
-            print(f"\n{format_display_name(self.metric)} Bridge:")
-            print(f"  {self.prior_period}:     {format_number(self.pvm_results['starting_value'])}")
-            print(f"  + Volume:       {format_number(self.pvm_results['volume_impact'])}")
-            print(f"  + Price:        {format_number(self.pvm_results['price_impact'])}")
-            print(f"  + Mix:          {format_number(self.pvm_results['mix_impact'])}")
-            print(f"  = {self.current_period}:     {format_number(self.pvm_results['ending_value'])}")
-            print(f"\n  Total Variance: {format_number(self.pvm_results['total_variance'])} ({self.pvm_results['total_variance']/self.pvm_results['starting_value']*100:+.1f}%)")
-
-        print("\n" + "-"*60)
-        print("KEY INSIGHTS:")
-        for fact in self.facts[:10]:
-            print(f"  • {fact['fact']}")
-
-        print("\n" + "="*60)
+    return {'data': data, 'col_defs': columns}
 
 
-def run_reckitt_pvm(current_period="Q2'26", prior_period="Q2'25", metric='net_revenue',
-                    breakout_dimensions=None, data_path=None, filters=None):
-    """
-    Convenience function to run Reckitt PVM analysis
+@skill(
+    name="Reckitt PVM Drivers",
+    llm_name="reckitt_pvm_drivers",
+    description=(
+        "Price-Volume-Mix variance analysis for Reckitt Surface Care brands. "
+        "Decomposes net revenue changes into Volume, Price, and Mix impacts using units as volume metric. "
+        "Compares current period vs prior period (e.g., Q2'26 vs Q2'25 for YoY analysis)."
+    ),
+    capabilities=(
+        "1) Price-Volume-Mix decomposition: Volume Impact (units change × prior price), "
+        "Price Impact (price change × current units), Mix Impact (portfolio shift). "
+        "2) Waterfall chart visualization showing variance bridge from prior to current period. "
+        "3) Dimensional breakout by brand, sub_category, segment, channel, state. "
+        "4) Top contributor identification - which brands/channels drove growth or decline. "
+        "5) YoY and sequential quarter comparisons."
+    ),
+    limitations=(
+        "Only analyzes Reckitt Benckiser brands (LYSOL, LYSOL POWER, LYSOL LAUNDRY SANITIZER). "
+        "Finance metrics (net_revenue, gross_sales, gross_margin) only available for Reckitt brands. "
+        "Data covers Q2'25 through Q2'26 (5 quarters)."
+    ),
+    example_questions=(
+        "What drove the net revenue change in Q2'26 vs Q2'25? | "
+        "Show me price-volume-mix analysis for Q4'25 vs Q3'25. | "
+        "Which brands contributed most to revenue growth? | "
+        "Break down the variance by channel. | "
+        "What is the YoY revenue change for Lysol?"
+    ),
+    parameter_guidance=(
+        "METRIC: net_revenue (default), gross_sales, or gross_margin. "
+        "CURRENT_PERIOD: Quarter to analyze (e.g., Q2'26, Q1'26, Q4'25, Q3'25, Q2'25). "
+        "PRIOR_PERIOD: Comparison quarter (e.g., Q2'25 for YoY, Q1'26 for sequential). "
+        "BREAKOUT_DIMENSIONS: brand, sub_category, segment, channel, state_name. "
+        "FILTERS: Narrow by brand, channel, sub_category, etc."
+    ),
+    parameters=[
+        SkillParameter(
+            name="metric",
+            description="Revenue metric to analyze: net_revenue (default), gross_sales, or gross_margin",
+            default_value="net_revenue"
+        ),
+        SkillParameter(
+            name="current_period",
+            description="Current period quarter (e.g., Q2'26, Q1'26, Q4'25)",
+            default_value="Q2'26"
+        ),
+        SkillParameter(
+            name="prior_period",
+            description="Prior period for comparison (e.g., Q2'25 for YoY, Q1'26 for sequential)",
+            default_value="Q2'25"
+        ),
+        SkillParameter(
+            name="breakout_dimensions",
+            constrained_to="dimensions",
+            is_multi=True,
+            description="Dimensions for breakout analysis: brand, sub_category, segment, channel, state_name"
+        ),
+        SkillParameter(
+            name="other_filters",
+            constrained_to="filters",
+            is_multi=True,
+            description="Filters to narrow analysis (e.g., brand='LYSOL', channel='Grocery')"
+        ),
+        SkillParameter(
+            name="max_prompt",
+            parameter_type="prompt",
+            description="Prompt for executive summary",
+            default_value=DEFAULT_MAX_PROMPT
+        ),
+        SkillParameter(
+            name="insight_prompt",
+            parameter_type="prompt",
+            description="Prompt for detailed insights",
+            default_value=DEFAULT_INSIGHT_PROMPT
+        )
+    ]
+)
+def reckitt_pvm_drivers(parameters: SkillInput) -> SkillOutput:
+    """Reckitt Price-Volume-Mix Driver Analysis"""
 
-    Args:
-        current_period: Current period (e.g., "Q2'26")
-        prior_period: Prior period for comparison (e.g., "Q2'25")
-        metric: Revenue metric to analyze ('net_revenue', 'gross_sales', 'gross_margin')
-        breakout_dimensions: List of dimensions for breakout analysis
-        data_path: Path to CSV file
-        filters: Dict of column->value filters
+    logger.info(f"Skill received parameters: {parameters.arguments}")
 
-    Returns:
-        ReckittPVMAnalysis instance with results
-    """
-    if breakout_dimensions is None:
-        breakout_dimensions = ['brand', 'sub_category', 'segment', 'channel', 'state_name']
+    # Extract parameters
+    metric = getattr(parameters.arguments, 'metric', 'net_revenue') or 'net_revenue'
+    current_period = getattr(parameters.arguments, 'current_period', "Q2'26") or "Q2'26"
+    prior_period = getattr(parameters.arguments, 'prior_period', "Q2'25") or "Q2'25"
+    breakout_dimensions = getattr(parameters.arguments, 'breakout_dimensions', None) or ['brand', 'sub_category', 'segment', 'channel', 'state_name']
+    other_filters = getattr(parameters.arguments, 'other_filters', []) or []
+    max_prompt = getattr(parameters.arguments, 'max_prompt', DEFAULT_MAX_PROMPT)
+    insight_prompt = getattr(parameters.arguments, 'insight_prompt', DEFAULT_INSIGHT_PROMPT)
 
-    analysis = ReckittPVMAnalysis(
-        data_path=data_path,
-        metric=metric,
-        current_period=current_period,
-        prior_period=prior_period,
-        breakout_dimensions=breakout_dimensions,
-        filters=filters or {}
+    # Get client
+    try:
+        from answerrocket_client import AnswerRocketClient
+        client = AnswerRocketClient()
+    except Exception as e:
+        logger.error(f"Failed to initialize AnswerRocketClient: {e}")
+        return SkillOutput(
+            final_prompt=f"Failed to initialize client: {str(e)}",
+            narrative=f"**Error**: Could not connect to AnswerRocket. {str(e)}",
+            visualizations=[],
+            warnings=[str(e)]
+        )
+
+    # Run analysis
+    try:
+        pvm_results, facts, current_df, prior_df = run_pvm_analysis(
+            client=client,
+            metric=metric,
+            current_period=current_period,
+            prior_period=prior_period,
+            breakout_dimensions=breakout_dimensions,
+            filters=other_filters
+        )
+    except ValueError as e:
+        logger.error(f"Analysis failed: {e}")
+        return SkillOutput(
+            final_prompt=f"Analysis could not be completed: {str(e)}",
+            narrative=f"**Error**: {str(e)}\n\nPlease verify the period values are valid (Q2'25, Q3'25, Q4'25, Q1'26, Q2'26).",
+            visualizations=[],
+            warnings=[str(e)]
+        )
+
+    # Generate insights
+    import jinja2
+    try:
+        from ar_analytics import ArUtils
+        ar_utils = ArUtils()
+        insight_template = jinja2.Template(insight_prompt).render(facts=facts)
+        insights = ar_utils.get_llm_response(insight_template)
+    except:
+        insights = "**Price-Volume-Mix Analysis Complete**\n\n" + "\n".join([f"- {f}" for f in facts])
+
+    # Create visualization
+    waterfall_data = create_waterfall_chart(pvm_results, current_period, prior_period, metric)
+    summary_table = create_summary_table(pvm_results, current_period, prior_period)
+
+    metric_display = format_display_name(metric)
+    layout_vars = {
+        "headline": f"{metric_display} Variance Analysis",
+        "sub_headline": f"{current_period} vs {prior_period} | Reckitt Surface Care",
+        **waterfall_data,
+        **summary_table
+    }
+
+    rendered = wire_layout(json.loads(WATERFALL_CHART_LAYOUT), layout_vars)
+
+    viz_list = [
+        SkillVisualization(title=f"{metric_display} PVM Analysis", layout=rendered)
+    ]
+
+    # Max prompt for response
+    max_response = jinja2.Template(max_prompt).render(facts=facts)
+
+    return SkillOutput(
+        final_prompt=max_response,
+        narrative=insights,
+        visualizations=viz_list
     )
 
-    analysis.run_analysis()
-    analysis.print_summary()
 
-    return analysis
+if __name__ == '__main__':
+    from skill_framework import preview_skill
 
-
-if __name__ == "__main__":
-    # Example: YoY comparison Q2'26 vs Q2'25
-    analysis = run_reckitt_pvm(
-        current_period="Q2'26",
-        prior_period="Q2'25",
-        metric='net_revenue'
-    )
-
-    # Show top brand contributors
-    print("\nTop Brand Contributors:")
-    if 'brand' in analysis.breakout_results:
-        print(analysis.breakout_results['brand'][['brand', 'variance', 'variance_pct']].head(10).to_string())
+    skill_input: SkillInput = reckitt_pvm_drivers.create_input(arguments={
+        'metric': 'net_revenue',
+        'current_period': "Q2'26",
+        'prior_period': "Q2'25",
+        'breakout_dimensions': ['brand', 'sub_category'],
+        'other_filters': []
+    })
+    out = reckitt_pvm_drivers(skill_input)
+    preview_skill(reckitt_pvm_drivers, out)
