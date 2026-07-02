@@ -589,6 +589,10 @@ class ReckittPVMAnalysis:
 
         filter_clause = self.build_filter_clause()
 
+        # Escape single quotes in period values for SQL
+        current_period_escaped = self.current_period.replace("'", "''")
+        prior_period_escaped = self.prior_period.replace("'", "''")
+
         # Query current period (Reckitt brands only)
         current_query = f"""
         SELECT brand, sub_category, segment, channel, state_name,
@@ -596,7 +600,7 @@ class ReckittPVMAnalysis:
                SUM(units) as units
         FROM read_csv('{DATA_FILE}')
         WHERE manufacturer = 'RECKITT BENCKISER'
-        AND quarter = '{self.current_period}'
+        AND quarter = '{current_period_escaped}'
         {filter_clause}
         GROUP BY brand, sub_category, segment, channel, state_name
         """
@@ -616,7 +620,7 @@ class ReckittPVMAnalysis:
                SUM(units) as units
         FROM read_csv('{DATA_FILE}')
         WHERE manufacturer = 'RECKITT BENCKISER'
-        AND quarter = '{self.prior_period}'
+        AND quarter = '{prior_period_escaped}'
         {filter_clause}
         GROUP BY brand, sub_category, segment, channel, state_name
         """
