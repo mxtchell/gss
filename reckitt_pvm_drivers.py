@@ -936,7 +936,7 @@ class ReckittPVMAnalysis:
             'chart_data': data_series,
             'chart_y_axis': {
                 'title': {'text': metric_display},
-                'labels': {'format': '${value:,.0f}M'},
+                'labels': {'format': '${value:,.1f}M'},
                 'min': min_val - padding,
                 'max': max_val + padding
             },
@@ -970,7 +970,7 @@ class ReckittPVMAnalysis:
             ],
             'chart_y_axis': {
                 'title': {'text': format_display_name(self.metric)},
-                'labels': {'format': '${value:,.0f}M'}
+                'labels': {'format': '${value:,.1f}M'}
             },
             'chart_title': f'{format_display_name(dimension)} Variance Analysis'
         }
@@ -1001,25 +1001,6 @@ class ReckittPVMAnalysis:
                 f"${self.pvm_results['prior_price']:.2f}",
                 f"${self.pvm_results['actual_price'] - self.pvm_results['prior_price']:+.2f}",
                 f"{(self.pvm_results['actual_price'] - self.pvm_results['prior_price']) / self.pvm_results['prior_price'] * 100:+.1f}%" if self.pvm_results['prior_price'] != 0 else "N/A"
-            ],
-            ["", "", "", "", ""],
-            [
-                "Volume Impact",
-                "", "",
-                format_number(self.pvm_results['volume_impact']),
-                f"{self.pvm_results['volume_impact'] / abs(self.pvm_results['total_variance']) * 100:.1f}% of var" if self.pvm_results['total_variance'] != 0 else "N/A"
-            ],
-            [
-                "Price Impact",
-                "", "",
-                format_number(self.pvm_results['price_impact']),
-                f"{self.pvm_results['price_impact'] / abs(self.pvm_results['total_variance']) * 100:.1f}% of var" if self.pvm_results['total_variance'] != 0 else "N/A"
-            ],
-            [
-                "Mix Impact",
-                "", "",
-                format_number(self.pvm_results['mix_impact']),
-                f"{self.pvm_results['mix_impact'] / abs(self.pvm_results['total_variance']) * 100:.1f}% of var" if self.pvm_results['total_variance'] != 0 else "N/A"
             ]
         ]
 
