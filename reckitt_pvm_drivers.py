@@ -591,35 +591,39 @@ class ReckittPVMAnalysis:
         """Convert period string to date range for month_new column query.
 
         Dataset has month_new with values like: 2025-04-01, 2025-05-01, etc.
+        Data covers Q2'25 through Q2'26.
         """
         if not period_str:
             raise ValueError("Period is required but was not provided")
 
         period_str = period_str.strip().upper()
 
-        # Quarter mapping to month_new date ranges
+        # Quarter mapping to month_new date ranges (first day of each month in quarter)
         quarter_map = {
+            # Q#'YY format
+            "Q1'25": ("2025-01-01", "2025-03-01"),
             "Q2'25": ("2025-04-01", "2025-06-01"),
             "Q3'25": ("2025-07-01", "2025-09-01"),
             "Q4'25": ("2025-10-01", "2025-12-01"),
             "Q1'26": ("2026-01-01", "2026-03-01"),
             "Q2'26": ("2026-04-01", "2026-06-01"),
-            # Also support Q2 2025 format
+            "Q3'26": ("2026-07-01", "2026-09-01"),
+            "Q4'26": ("2026-10-01", "2026-12-01"),
+            # Q# YYYY format
+            "Q1 2025": ("2025-01-01", "2025-03-01"),
             "Q2 2025": ("2025-04-01", "2025-06-01"),
             "Q3 2025": ("2025-07-01", "2025-09-01"),
             "Q4 2025": ("2025-10-01", "2025-12-01"),
             "Q1 2026": ("2026-01-01", "2026-03-01"),
             "Q2 2026": ("2026-04-01", "2026-06-01"),
+            "Q3 2026": ("2026-07-01", "2026-09-01"),
+            "Q4 2026": ("2026-10-01", "2026-12-01"),
         }
 
         if period_str in quarter_map:
             return quarter_map[period_str]
 
-        # Try to parse as Q2'25 format
-        if "'" in period_str:
-            return quarter_map.get(period_str, (period_str, period_str))
-
-        raise ValueError(f"Unknown period format: {period_str}. Use Q2'25 or Q2 2025 format.")
+        raise ValueError(f"Unknown period: {period_str}. Valid periods: Q2'25 through Q2'26.")
 
     def query_data(self):
         """Query current and prior period data from database"""
