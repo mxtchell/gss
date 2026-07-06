@@ -21,7 +21,7 @@ import os
 logger = logging.getLogger(__name__)
 
 # Database Configuration
-DATABASE_ID = os.getenv('DATABASE_ID', '')
+DATABASE_ID = "b855f1b7-35ea-46e1-b1d7-1630eea5ca82"
 DATA_FILE = 'reckitt_surface_care_poc.csv'
 
 
@@ -568,6 +568,10 @@ class ReckittPVMAnalysis:
                 dim = filter_dict.get('dim')
                 op = filter_dict.get('op', '=')
                 val = filter_dict.get('val')
+
+                # Skip manufacturer filter - already hardcoded in query
+                if dim and dim.lower() == 'manufacturer':
+                    continue
 
                 if dim and val:
                     if isinstance(val, list):
