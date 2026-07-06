@@ -596,7 +596,8 @@ class ReckittPVMAnalysis:
         if not period_str:
             raise ValueError("Period is required but was not provided")
 
-        period_str = period_str.strip().upper()
+        # Normalize: strip, uppercase, and convert curly quotes to straight quotes
+        period_str = period_str.strip().upper().replace("'", "'").replace("'", "'")
 
         # Quarter mapping to month_new date ranges (first day of each month in quarter)
         quarter_map = {
