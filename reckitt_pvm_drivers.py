@@ -583,15 +583,52 @@ class ReckittPVMAnalysis:
 
         return " AND " + " AND ".join(clauses) if clauses else ""
 
+    def parse_period_to_date_range(self, period_str):
+        """Convert period string to date range for month_new column query.
+
+        Dataset has month_new with values like: 2025-04-01, 2025-05-01, etc.
+        """
+        if not period_str:
+            raise ValueError("Period is required but was not provided")
+
+        period_str = period_str.strip().upper()
+
+        # Quarter mapping to month_new date ranges
+        quarter_map = {
+            "Q2'25": ("2025-04-01", "2025-06-01"),
+            "Q3'25": ("2025-07-01", "2025-09-01"),
+            "Q4'25": ("2025-10-01", "2025-12-01"),
+            "Q1'26": ("2026-01-01", "2026-03-01"),
+            "Q2'26": ("2026-04-01", "2026-06-01"),
+            # Also support Q2 2025 format
+            "Q2 2025": ("2025-04-01", "2025-06-01"),
+            "Q3 2025": ("2025-07-01", "2025-09-01"),
+            "Q4 2025": ("2025-10-01", "2025-12-01"),
+            "Q1 2026": ("2026-01-01", "2026-03-01"),
+            "Q2 2026": ("2026-04-01", "2026-06-01"),
+        }
+
+        if period_str in quarter_map:
+            return quarter_map[period_str]
+
+        # Try to parse as Q2'25 format
+        if "'" in period_str:
+            return quarter_map.get(period_str, (period_str, period_str))
+
+        raise ValueError(f"Unknown period format: {period_str}. Use Q2'25 or Q2 2025 format.")
+
     def query_data(self):
         """Query current and prior period data from database"""
         logger.info(f"Querying data for metric: {self.metric}, periods: {self.current_period} vs {self.prior_period}")
 
         filter_clause = self.build_filter_clause()
 
-        # Escape single quotes in period values for SQL
-        current_period_escaped = self.current_period.replace("'", "''")
-        prior_period_escaped = self.prior_period.replace("'", "''")
+        # Parse periods to date ranges for month_new column
+        current_start, current_end = self.parse_period_to_date_range(self.current_period)
+        prior_start, prior_end = self.parse_period_to_date_range(self.prior_period)
+
+        logger.info(f"Current period: month_new BETWEEN '{current_start}' AND '{current_end}'")
+        logger.info(f"Prior period: month_new BETWEEN '{prior_start}' AND '{prior_end}'")
 
         # Query current period (Reckitt brands only)
         current_query = f"""
@@ -600,7 +637,7 @@ class ReckittPVMAnalysis:
                SUM(units) as units
         FROM read_csv('{DATA_FILE}')
         WHERE manufacturer = 'RECKITT BENCKISER'
-        AND quarter = '{current_period_escaped}'
+        AND month_new BETWEEN '{current_start}' AND '{current_end}'
         {filter_clause}
         GROUP BY brand, sub_category, segment, channel, state_name
         """
@@ -611,7 +648,9 @@ class ReckittPVMAnalysis:
             sql_query=current_query,
             row_limit=50000
         )
-        self.current_df = result.df if hasattr(result, 'df') else None
+        if not result.success:
+            raise ValueError(f"Current period query failed: {result.error}")
+        self.current_df = result.df
 
         # Query prior period
         prior_query = f"""
@@ -620,7 +659,7 @@ class ReckittPVMAnalysis:
                SUM(units) as units
         FROM read_csv('{DATA_FILE}')
         WHERE manufacturer = 'RECKITT BENCKISER'
-        AND quarter = '{prior_period_escaped}'
+        AND month_new BETWEEN '{prior_start}' AND '{prior_end}'
         {filter_clause}
         GROUP BY brand, sub_category, segment, channel, state_name
         """
@@ -631,15 +670,17 @@ class ReckittPVMAnalysis:
             sql_query=prior_query,
             row_limit=50000
         )
-        self.prior_df = result.df if hasattr(result, 'df') else None
+        if not result.success:
+            raise ValueError(f"Prior period query failed: {result.error}")
+        self.prior_df = result.df
 
         logger.info(f"Current shape: {self.current_df.shape if self.current_df is not None else 'None'}")
         logger.info(f"Prior shape: {self.prior_df.shape if self.prior_df is not None else 'None'}")
 
         if self.current_df is None or self.current_df.empty:
-            raise ValueError(f"No data found for current period: {self.current_period}")
+            raise ValueError(f"No data found for current period: {self.current_period} (month_new BETWEEN '{current_start}' AND '{current_end}')")
         if self.prior_df is None or self.prior_df.empty:
-            raise ValueError(f"No data found for prior period: {self.prior_period}")
+            raise ValueError(f"No data found for prior period: {self.prior_period} (month_new BETWEEN '{prior_start}' AND '{prior_end}')")
 
     def calculate_price_volume_mix(self):
         """Calculate Price-Volume-Mix decomposition"""
